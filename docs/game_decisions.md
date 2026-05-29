@@ -49,6 +49,13 @@ This is deliberately small. It exists to prove input, state, interaction, and HU
 - Keep input bindings close to code while prototyping.
 - Build systems behind simple interfaces so later AI passes can extend them safely.
 - Add tests or simulation scripts once the economy has enough rules to regress.
+- Store maps as JSON data under `maps/` and load them through `MapLoader`.
+- Map files should stay schema-light while prototyping: `buildings`, `walls`, `npcs`, `contacts`, and `triggers` are top-level arrays so new maps can add content without scene edits.
+- Triggers are included in the map schema before they are fully active; future passes can attach gameplay behavior to those data records.
+- The in-game phone is the main expandable player interface. It starts with Messages, Map, and Bank apps.
+- The phone Map app must render from the same active map data as the playable world rather than maintaining a separate minimap layout.
+- Character health and weapons are component-style scripts. Keep combat simple and data-driven until there is a clear need for richer AI or weapon inheritance.
+- Projectiles are the first weapon delivery type. Future weapons should extend data first, then specialized scripts only when behavior meaningfully differs.
 
 ## Tone
 

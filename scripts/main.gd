@@ -2,9 +2,15 @@ extends Node2D
 
 const PLAYER_SCENE := preload("res://scenes/player/Player.tscn")
 const CONTACT_SCENE := preload("res://scenes/market/MarketContact.tscn")
+const NPC_SCENE := preload("res://scenes/npc/BasicNpc.tscn")
+const MAP_LOADER_SCRIPT := preload("res://scripts/map_loader.gd")
+const PHONE_UI_SCRIPT := preload("res://scripts/phone_ui.gd")
+const DEFAULT_MAP_PATH := "res://maps/neighborhood_basic.json"
 
 var player: CharacterBody2D
 var active_contact: Area2D
+var map_loader
+var phone_ui
 var hud_label: Label
 var prompt_label: Label
 var status_label: Label
@@ -12,15 +18,26 @@ var scope_label: Label
 
 func _ready() -> void:
 	_ensure_input_map()
+	_load_map(DEFAULT_MAP_PATH)
 	_spawn_player()
+	_spawn_npcs()
 	_spawn_contacts()
 	_build_hud()
+	_build_phone()
 	GameState.state_changed.connect(_refresh_hud)
 	_refresh_hud()
-	_set_status("Find a contact. Build the first neighborhood route.")
+	_set_status("Find a contact in %s. Build the first neighborhood route." % map_loader.get_title())
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("phone"):
+		phone_ui.toggle()
+		get_viewport().set_input_as_handled()
+		return
+
+	if phone_ui != null and phone_ui.is_open():
+		return
+
 	if active_contact == null:
 		return
 
@@ -32,29 +49,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		_try_contact_action("fixer")
 
 
-func _draw() -> void:
-	draw_rect(Rect2(Vector2(-2000.0, -2000.0), Vector2(4000.0, 4000.0)), Color(0.06, 0.07, 0.075))
-
-	for x in range(-1000, 1001, 80):
-		draw_line(Vector2(x, -800.0), Vector2(x, 800.0), Color(0.10, 0.11, 0.12), 1.0)
-	for y in range(-800, 801, 80):
-		draw_line(Vector2(-1000.0, y), Vector2(1000.0, y), Color(0.10, 0.11, 0.12), 1.0)
-
-	var building_color := Color(0.16, 0.18, 0.19)
-	var trim_color := Color(0.28, 0.32, 0.33)
-	for block in [
-		Rect2(-520.0, -260.0, 220.0, 150.0),
-		Rect2(240.0, -310.0, 280.0, 190.0),
-		Rect2(-160.0, 160.0, 340.0, 170.0),
-		Rect2(410.0, 150.0, 180.0, 260.0),
-	]:
-		draw_rect(block, building_color)
-		draw_rect(block, trim_color, false, 3.0)
+func _load_map(path: String) -> void:
+	map_loader = MAP_LOADER_SCRIPT.new()
+	add_child(map_loader)
+	map_loader.load_map(path)
 
 
 func _spawn_player() -> void:
 	player = PLAYER_SCENE.instantiate()
-	player.position = Vector2.ZERO
+	player.position = map_loader.get_player_start()
 	add_child(player)
 
 	var camera := Camera2D.new()
@@ -65,34 +68,32 @@ func _spawn_player() -> void:
 
 
 func _spawn_contacts() -> void:
-	var contact_data := [
-		{
-			"name": "Corner Supplier",
-			"type": "supplier",
-			"position": Vector2(-280.0, -160.0),
-			"color": Color(0.95, 0.68, 0.20),
-		},
-		{
-			"name": "Night Buyer",
-			"type": "buyer",
-			"position": Vector2(310.0, -80.0),
-			"color": Color(0.42, 0.82, 0.48),
-		},
-		{
-			"name": "Quiet Fixer",
-			"type": "fixer",
-			"position": Vector2(30.0, 260.0),
-			"color": Color(0.58, 0.50, 0.92),
-		},
-	]
-
-	for data in contact_data:
+	for data in map_loader.get_contacts():
 		var contact: Area2D = CONTACT_SCENE.instantiate()
-		contact.position = data["position"]
-		contact.set_contact_data(data["name"], data["type"], data["color"])
+		contact.position = _read_vector2(data.get("position", [0.0, 0.0]))
+		contact.set_contact_data(
+			str(data.get("name", "Contact")),
+			str(data.get("type", "supplier")),
+			_read_color(data.get("color", []), Color(0.93, 0.72, 0.25))
+		)
 		add_child(contact)
 		contact.contacted.connect(_on_contacted)
 		contact.player_presence_changed.connect(_on_contact_presence_changed)
+
+
+func _spawn_npcs() -> void:
+	for data in map_loader.get_npcs():
+		var npc = NPC_SCENE.instantiate()
+		npc.position = _read_vector2(data.get("position", [0.0, 0.0]))
+		npc.setup(data)
+		add_child(npc)
+
+
+func _build_phone() -> void:
+	phone_ui = PHONE_UI_SCRIPT.new()
+	add_child(phone_ui)
+	phone_ui.setup(map_loader, player)
+	phone_ui.phone_visibility_changed.connect(_on_phone_visibility_changed)
 
 
 func _build_hud() -> void:
@@ -185,9 +186,9 @@ func _refresh_prompt() -> void:
 		return
 
 	if active_contact == null:
-		prompt_label.text = "Move: WASD / Arrows"
+		prompt_label.text = "Move: WASD / Arrows    Mouse Aim    Space Fire    Tab Phone"
 	else:
-		prompt_label.text = "%s: E %s    B Buy    X Sell    F Fixer" % [
+		prompt_label.text = "%s: E %s    B Buy    X Sell    F Fixer    Mouse Aim    Space Fire    Tab Phone" % [
 			active_contact.contact_name,
 			active_contact.get_action_label(),
 		]
@@ -211,6 +212,8 @@ func _ensure_input_map() -> void:
 	_bind_key("trade_buy", KEY_B)
 	_bind_key("trade_sell", KEY_X)
 	_bind_key("reduce_heat", KEY_F)
+	_bind_key("phone", KEY_TAB)
+	_bind_key("fire", KEY_SPACE)
 
 
 func _bind_key(action_name: StringName, physical_keycode: Key) -> void:
@@ -224,3 +227,21 @@ func _bind_key(action_name: StringName, physical_keycode: Key) -> void:
 	var input_event := InputEventKey.new()
 	input_event.physical_keycode = physical_keycode
 	InputMap.action_add_event(action_name, input_event)
+
+
+func _read_vector2(value: Variant) -> Vector2:
+	if value is Array and value.size() >= 2:
+		return Vector2(float(value[0]), float(value[1]))
+	return Vector2.ZERO
+
+
+func _read_color(value: Variant, fallback: Color) -> Color:
+	if value is Array and value.size() >= 3:
+		var alpha: float = float(value[3]) if value.size() >= 4 else 1.0
+		return Color(float(value[0]), float(value[1]), float(value[2]), alpha)
+	return fallback
+
+
+func _on_phone_visibility_changed(is_open: bool) -> void:
+	if player != null:
+		player.set("controls_enabled", not is_open)

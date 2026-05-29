@@ -1,0 +1,128 @@
+{
+	"schema_version": 1,
+	"id": "neighborhood_basic",
+	"name": "Rook Street Neighborhood",
+	"bounds": [-1200, -900, 2400, 1800],
+	"background_color": [0.055, 0.065, 0.07],
+	"player_start": [-40, 40],
+	"grid": {
+		"enabled": true,
+		"spacing": 80,
+		"color": [0.10, 0.11, 0.12, 1.0]
+	},
+	"buildings": [
+		{
+			"id": "west_row_shops",
+			"name": "West Row Shops",
+			"rect": [-620, -310, 250, 180],
+			"color": [0.15, 0.18, 0.19],
+			"trim_color": [0.28, 0.33, 0.34],
+			"collides": true
+		},
+		{
+			"id": "corner_market",
+			"name": "Corner Market",
+			"rect": [230, -350, 310, 210],
+			"color": [0.17, 0.16, 0.18],
+			"trim_color": [0.34, 0.30, 0.36],
+			"collides": true
+		},
+		{
+			"id": "old_laundry",
+			"name": "Old Laundry",
+			"rect": [-190, 170, 360, 175],
+			"color": [0.18, 0.19, 0.17],
+			"trim_color": [0.34, 0.35, 0.30],
+			"collides": true
+		},
+		{
+			"id": "brick_walkups",
+			"name": "Brick Walkups",
+			"rect": [410, 150, 190, 285],
+			"color": [0.19, 0.15, 0.14],
+			"trim_color": [0.36, 0.29, 0.25],
+			"collides": true
+		},
+		{
+			"id": "north_garages",
+			"name": "North Garages",
+			"rect": [-120, -560, 390, 120],
+			"color": [0.14, 0.16, 0.18],
+			"trim_color": [0.26, 0.31, 0.36],
+			"collides": true
+		}
+	],
+	"walls": [
+		{
+			"id": "south_fence",
+			"rect": [-700, 520, 820, 28],
+			"color": [0.31, 0.33, 0.30],
+			"collides": true
+		},
+		{
+			"id": "alley_barrier",
+			"rect": [700, -210, 34, 420],
+			"color": [0.33, 0.34, 0.32],
+			"collides": true
+		}
+	],
+	"npcs": [
+		{
+			"id": "stoop_regular",
+			"name": "Mira",
+			"role": "neighbor",
+			"position": [-720, -80],
+			"health": 60,
+			"color": [0.70, 0.77, 0.82],
+			"dialogue": ["People notice patterns around here."]
+		},
+		{
+			"id": "night_vendor",
+			"name": "Oren",
+			"role": "vendor",
+			"position": [650, 330],
+			"health": 70,
+			"color": [0.78, 0.68, 0.55],
+			"weapon": {
+				"name": "Holdout",
+				"damage": 12,
+				"projectile_speed": 620,
+				"projectile_lifetime": 1.0,
+				"fire_cooldown": 0.55
+			},
+			"dialogue": ["Late hours, quiet hands."]
+		}
+	],
+	"contacts": [
+		{
+			"id": "corner_supplier",
+			"name": "Corner Supplier",
+			"type": "supplier",
+			"position": [-280, -160],
+			"color": [0.95, 0.68, 0.20]
+		},
+		{
+			"id": "night_buyer",
+			"name": "Night Buyer",
+			"type": "buyer",
+			"position": [310, -80],
+			"color": [0.42, 0.82, 0.48]
+		},
+		{
+			"id": "quiet_fixer",
+			"name": "Quiet Fixer",
+			"type": "fixer",
+			"position": [30, 260],
+			"color": [0.58, 0.50, 0.92]
+		}
+	],
+	"triggers": [
+		{
+			"id": "alley_intro",
+			"type": "message",
+			"rect": [-360, -80, 180, 160],
+			"once": true,
+			"message": "The alley gives you cover, but not privacy."
+		}
+	]
+}
