@@ -1,8 +1,8 @@
 extends Area2D
 class_name MarketContact
 
-signal contacted(contact: MarketContact)
-signal player_presence_changed(contact: MarketContact, is_near: bool)
+signal contacted(contact: Area2D)
+signal player_presence_changed(contact: Area2D, is_near: bool)
 
 @export var contact_name: String = "Contact"
 @export_enum("supplier", "buyer", "fixer") var contact_type: String = "supplier"
@@ -56,14 +56,14 @@ func get_action_label() -> String:
 
 
 func _on_body_entered(body: Node) -> void:
-	if body is PlayerController:
+	if body is CharacterBody2D:
 		player_near = true
 		player_presence_changed.emit(self, true)
 		queue_redraw()
 
 
 func _on_body_exited(body: Node) -> void:
-	if body is PlayerController:
+	if body is CharacterBody2D:
 		player_near = false
 		player_presence_changed.emit(self, false)
 		queue_redraw()

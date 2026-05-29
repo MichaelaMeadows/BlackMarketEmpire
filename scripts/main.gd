@@ -3,8 +3,8 @@ extends Node2D
 const PLAYER_SCENE := preload("res://scenes/player/Player.tscn")
 const CONTACT_SCENE := preload("res://scenes/market/MarketContact.tscn")
 
-var player: PlayerController
-var active_contact: MarketContact
+var player: CharacterBody2D
+var active_contact: Area2D
 var hud_label: Label
 var prompt_label: Label
 var status_label: Label
@@ -87,7 +87,7 @@ func _spawn_contacts() -> void:
 	]
 
 	for data in contact_data:
-		var contact: MarketContact = CONTACT_SCENE.instantiate()
+		var contact: Area2D = CONTACT_SCENE.instantiate()
 		contact.position = data["position"]
 		contact.set_contact_data(data["name"], data["type"], data["color"])
 		add_child(contact)
@@ -135,7 +135,7 @@ func _build_hud() -> void:
 	layout.add_child(status_label)
 
 
-func _on_contact_presence_changed(contact: MarketContact, is_near: bool) -> void:
+func _on_contact_presence_changed(contact: Area2D, is_near: bool) -> void:
 	if is_near:
 		active_contact = contact
 	else:
@@ -144,7 +144,7 @@ func _on_contact_presence_changed(contact: MarketContact, is_near: bool) -> void
 	_refresh_prompt()
 
 
-func _on_contacted(contact: MarketContact) -> void:
+func _on_contacted(contact: Area2D) -> void:
 	active_contact = contact
 	_try_contact_action(contact.contact_type)
 
