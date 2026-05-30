@@ -25,6 +25,7 @@ func _ready() -> void:
 	_build_hud()
 	_build_phone()
 	GameState.state_changed.connect(_refresh_hud)
+	GameState.progression_event_triggered.connect(_on_progression_event_triggered)
 	_refresh_hud()
 	_set_status("Find a contact in %s. Build the first neighborhood route." % map_loader.get_title())
 
@@ -87,6 +88,7 @@ func _spawn_npcs() -> void:
 		npc.position = _read_vector2(data.get("position", [0.0, 0.0]))
 		npc.setup(data)
 		add_child(npc)
+		npc.died.connect(_on_npc_died)
 
 
 func _build_phone() -> void:
@@ -170,10 +172,12 @@ func _try_contact_action(required_type: String) -> void:
 
 
 func _refresh_hud() -> void:
-	hud_label.text = "Cash: $%d    Stock: %d %s    Heat: %d%%    Scope: %s" % [
+	hud_label.text = "Cash: $%d    Stock: %d %s    Buy: $%d    Sell: $%d    Heat: %d%%    Scope: %s" % [
 		GameState.cash,
 		GameState.get_stock(),
 		GameState.product_name,
+		GameState.get_current_buy_price(),
+		GameState.get_current_sell_price(),
 		GameState.heat,
 		GameState.get_scope_label(),
 	]
@@ -197,6 +201,16 @@ func _refresh_prompt() -> void:
 func _set_status(message: String) -> void:
 	if status_label != null:
 		status_label.text = message
+
+
+func _on_npc_died(_npc: CharacterBody2D) -> void:
+	GameState.record_kill("npc")
+
+
+func _on_progression_event_triggered(event: Dictionary) -> void:
+	var message: String = str(event.get("message", ""))
+	if message != "":
+		_set_status(message)
 
 
 func _ensure_input_map() -> void:

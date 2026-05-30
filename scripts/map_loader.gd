@@ -6,6 +6,8 @@ const DEFAULT_GRID_COLOR := Color(0.10, 0.11, 0.12)
 const DEFAULT_BUILDING_COLOR := Color(0.16, 0.18, 0.19)
 const DEFAULT_BUILDING_TRIM := Color(0.28, 0.32, 0.33)
 const DEFAULT_WALL_COLOR := Color(0.33, 0.34, 0.32)
+const DEFAULT_ZONE_COLOR := Color(0.10, 0.14, 0.10, 0.65)
+const DEFAULT_TREE_COLOR := Color(0.12, 0.33, 0.16)
 
 var map_data: Dictionary = {}
 var map_path: String = ""
@@ -73,8 +75,10 @@ func _draw() -> void:
 	var bounds: Rect2 = _read_rect(map_data.get("bounds", [-2000.0, -2000.0, 4000.0, 4000.0]))
 	draw_rect(bounds, _read_color(map_data.get("background_color", []), DEFAULT_BACKGROUND))
 	_draw_grid(bounds)
+	_draw_zone_collection("zones", DEFAULT_ZONE_COLOR)
 	_draw_rect_collection("buildings", DEFAULT_BUILDING_COLOR, DEFAULT_BUILDING_TRIM)
 	_draw_rect_collection("walls", DEFAULT_WALL_COLOR, DEFAULT_WALL_COLOR)
+	_draw_props()
 
 
 func _draw_grid(bounds: Rect2) -> void:
@@ -99,6 +103,25 @@ func _draw_rect_collection(collection_name: String, fill_fallback: Color, trim_f
 		draw_rect(rect, trim_color, false, float(item.get("outline_width", 3.0)))
 
 
+func _draw_zone_collection(collection_name: String, fill_fallback: Color) -> void:
+	for item in map_data.get(collection_name, []):
+		var rect: Rect2 = _read_rect(item.get("rect", []))
+		var fill_color: Color = _read_color(item.get("color", []), fill_fallback)
+		draw_rect(rect, fill_color)
+
+
+func _draw_props() -> void:
+	for item in map_data.get("props", []):
+		var prop_type: String = str(item.get("type", "tree"))
+		match prop_type:
+			"tree":
+				var position: Vector2 = _read_vector2(item.get("position", [0.0, 0.0]))
+				var radius: float = float(item.get("radius", 22.0))
+				var color: Color = _read_color(item.get("color", []), DEFAULT_TREE_COLOR)
+				draw_circle(position, radius, color)
+				draw_circle(position + Vector2(-radius * 0.2, -radius * 0.2), radius * 0.45, color.lightened(0.18))
+
+
 func _rebuild_collision() -> void:
 	for child in get_children():
 		child.queue_free()
@@ -108,6 +131,15 @@ func _rebuild_collision() -> void:
 			if not bool(item.get("collides", true)):
 				continue
 			_add_rect_collision(_read_rect(item.get("rect", [])), str(item.get("id", collection_name)))
+
+	for item in map_data.get("props", []):
+		if not bool(item.get("collides", false)):
+			continue
+		_add_circle_collision(
+			_read_vector2(item.get("position", [0.0, 0.0])),
+			float(item.get("collision_radius", item.get("radius", 22.0))),
+			str(item.get("id", "prop"))
+		)
 
 
 func _add_rect_collision(rect: Rect2, id: String) -> void:
@@ -120,6 +152,19 @@ func _add_rect_collision(rect: Rect2, id: String) -> void:
 	var rectangle := RectangleShape2D.new()
 	rectangle.size = rect.size
 	shape.shape = rectangle
+	body.add_child(shape)
+
+
+func _add_circle_collision(position: Vector2, radius: float, id: String) -> void:
+	var body := StaticBody2D.new()
+	body.name = "Collision_%s" % id
+	body.position = position
+	add_child(body)
+
+	var shape := CollisionShape2D.new()
+	var circle := CircleShape2D.new()
+	circle.radius = radius
+	shape.shape = circle
 	body.add_child(shape)
 
 
@@ -149,6 +194,8 @@ func _empty_map() -> Dictionary:
 		"player_start": [0.0, 0.0],
 		"buildings": [],
 		"walls": [],
+		"zones": [],
+		"props": [],
 		"npcs": [],
 		"contacts": [],
 		"triggers": [],

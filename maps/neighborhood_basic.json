@@ -2,76 +2,243 @@
 	"schema_version": 1,
 	"id": "neighborhood_basic",
 	"name": "Rook Street Neighborhood",
-	"bounds": [-1200, -900, 2400, 1800],
-	"background_color": [0.055, 0.065, 0.07],
-	"player_start": [-40, 40],
+	"bounds": [-2400, -1800, 4800, 3600],
+	"background_color": [0.052, 0.060, 0.064],
+	"player_start": [-140, 120],
 	"grid": {
 		"enabled": true,
 		"spacing": 80,
-		"color": [0.10, 0.11, 0.12, 1.0]
+		"color": [0.095, 0.105, 0.112, 1.0]
 	},
+	"zones": [
+		{
+			"id": "north_road",
+			"name": "Mercer Avenue",
+			"rect": [-2400, -760, 4800, 280],
+			"color": [0.070, 0.074, 0.078, 1.0]
+		},
+		{
+			"id": "main_road",
+			"name": "Rook Street",
+			"rect": [-2400, -80, 4800, 300],
+			"color": [0.066, 0.070, 0.074, 1.0]
+		},
+		{
+			"id": "east_road",
+			"name": "Pine Cut",
+			"rect": [820, -1800, 300, 3600],
+			"color": [0.064, 0.068, 0.072, 1.0]
+		},
+		{
+			"id": "wooded_area",
+			"name": "Hollow Pines",
+			"rect": [1160, 820, 1040, 760],
+			"color": [0.060, 0.145, 0.075, 0.78]
+		}
+	],
 	"buildings": [
 		{
-			"id": "west_row_shops",
-			"name": "West Row Shops",
-			"rect": [-620, -310, 250, 180],
-			"color": [0.15, 0.18, 0.19],
-			"trim_color": [0.28, 0.33, 0.34],
-			"collides": true
+			"id": "maple_house",
+			"name": "Maple House",
+			"kind": "house",
+			"rect": [-1980, -1380, 540, 400],
+			"color": [0.18, 0.16, 0.15],
+			"trim_color": [0.35, 0.30, 0.25],
+			"collides": false,
+			"rooms": [
+				{"id": "living_room", "rect": [-1954, -1354, 250, 210]},
+				{"id": "bedroom", "rect": [-1680, -1354, 214, 180]},
+				{"id": "kitchen", "rect": [-1954, -1122, 488, 116]}
+			]
 		},
 		{
-			"id": "corner_market",
-			"name": "Corner Market",
-			"rect": [230, -350, 310, 210],
-			"color": [0.17, 0.16, 0.18],
-			"trim_color": [0.34, 0.30, 0.36],
-			"collides": true
+			"id": "row_house",
+			"name": "Row House",
+			"kind": "house",
+			"rect": [-1260, -1360, 520, 390],
+			"color": [0.17, 0.18, 0.16],
+			"trim_color": [0.31, 0.34, 0.29],
+			"collides": false,
+			"rooms": [
+				{"id": "front_room", "rect": [-1234, -1334, 240, 190]},
+				{"id": "office", "rect": [-970, -1334, 204, 160]},
+				{"id": "back_room", "rect": [-1234, -1120, 468, 124]}
+			]
 		},
 		{
-			"id": "old_laundry",
-			"name": "Old Laundry",
-			"rect": [-190, 170, 360, 175],
-			"color": [0.18, 0.19, 0.17],
-			"trim_color": [0.34, 0.35, 0.30],
-			"collides": true
+			"id": "cedar_house",
+			"name": "Cedar House",
+			"kind": "house",
+			"rect": [-2040, 360, 560, 420],
+			"color": [0.16, 0.18, 0.20],
+			"trim_color": [0.28, 0.34, 0.39],
+			"collides": false,
+			"rooms": [
+				{"id": "living_room", "rect": [-2014, 386, 270, 210]},
+				{"id": "bedroom", "rect": [-1720, 386, 214, 186]},
+				{"id": "kitchen", "rect": [-2014, 620, 508, 134]}
+			]
 		},
 		{
-			"id": "brick_walkups",
-			"name": "Brick Walkups",
-			"rect": [410, 150, 190, 285],
-			"color": [0.19, 0.15, 0.14],
-			"trim_color": [0.36, 0.29, 0.25],
-			"collides": true
+			"id": "duplex",
+			"name": "Rook Duplex",
+			"kind": "house",
+			"rect": [-1180, 380, 620, 430],
+			"color": [0.18, 0.17, 0.19],
+			"trim_color": [0.34, 0.31, 0.36],
+			"collides": false,
+			"rooms": [
+				{"id": "west_unit", "rect": [-1154, 406, 280, 378]},
+				{"id": "east_unit", "rect": [-850, 406, 264, 378]}
+			]
 		},
 		{
-			"id": "north_garages",
-			"name": "North Garages",
-			"rect": [-120, -560, 390, 120],
-			"color": [0.14, 0.16, 0.18],
-			"trim_color": [0.26, 0.31, 0.36],
-			"collides": true
+			"id": "pine_house",
+			"name": "Pine House",
+			"kind": "house",
+			"rect": [1280, -1360, 560, 400],
+			"color": [0.18, 0.15, 0.14],
+			"trim_color": [0.38, 0.30, 0.25],
+			"collides": false,
+			"rooms": [
+				{"id": "living_room", "rect": [1306, -1334, 250, 200]},
+				{"id": "bedroom", "rect": [1580, -1334, 234, 176]},
+				{"id": "kitchen", "rect": [1306, -1110, 508, 124]}
+			]
+		},
+		{
+			"id": "rook_market",
+			"name": "Rook Market",
+			"kind": "store",
+			"rect": [-520, -1420, 760, 520],
+			"color": [0.18, 0.20, 0.19],
+			"trim_color": [0.34, 0.40, 0.35],
+			"collides": false,
+			"rooms": [
+				{"id": "sales_floor", "rect": [-494, -1394, 500, 300]},
+				{"id": "storage", "rect": [30, -1394, 184, 220]},
+				{"id": "office", "rect": [30, -1150, 184, 224]}
+			]
+		},
+		{
+			"id": "hardware_store",
+			"name": "Mercer Hardware",
+			"kind": "store",
+			"rect": [420, 360, 760, 520],
+			"color": [0.20, 0.18, 0.15],
+			"trim_color": [0.40, 0.35, 0.27],
+			"collides": false,
+			"rooms": [
+				{"id": "sales_floor", "rect": [446, 386, 500, 310]},
+				{"id": "storage", "rect": [970, 386, 184, 250]},
+				{"id": "loading_room", "rect": [446, 720, 708, 134]}
+			]
+		},
+		{
+			"id": "police_station",
+			"name": "Rook Precinct",
+			"kind": "police_station",
+			"rect": [1280, -420, 820, 620],
+			"color": [0.15, 0.17, 0.20],
+			"trim_color": [0.30, 0.36, 0.45],
+			"collides": false,
+			"rooms": [
+				{"id": "lobby", "rect": [1306, -394, 360, 250]},
+				{"id": "dispatch", "rect": [1690, -394, 384, 210]},
+				{"id": "holding", "rect": [1306, -120, 280, 294]},
+				{"id": "offices", "rect": [1610, -120, 464, 294]}
+			]
 		}
 	],
 	"walls": [
-		{
-			"id": "south_fence",
-			"rect": [-700, 520, 820, 28],
-			"color": [0.31, 0.33, 0.30],
-			"collides": true
-		},
-		{
-			"id": "alley_barrier",
-			"rect": [700, -210, 34, 420],
-			"color": [0.33, 0.34, 0.32],
-			"collides": true
-		}
+		{"id": "maple_north", "rect": [-1980, -1380, 540, 26], "color": [0.36, 0.30, 0.25], "collides": true},
+		{"id": "maple_south_w", "rect": [-1980, -1006, 230, 26], "color": [0.36, 0.30, 0.25], "collides": true},
+		{"id": "maple_south_e", "rect": [-1660, -1006, 220, 26], "color": [0.36, 0.30, 0.25], "collides": true},
+		{"id": "maple_west", "rect": [-1980, -1380, 26, 400], "color": [0.36, 0.30, 0.25], "collides": true},
+		{"id": "maple_east", "rect": [-1466, -1380, 26, 400], "color": [0.36, 0.30, 0.25], "collides": true},
+		{"id": "maple_room_divider_a", "rect": [-1704, -1354, 22, 170], "color": [0.32, 0.27, 0.23], "collides": true},
+		{"id": "maple_room_divider_b", "rect": [-1704, -1110, 22, 104], "color": [0.32, 0.27, 0.23], "collides": true},
+		{"id": "maple_back_wall", "rect": [-1954, -1144, 250, 22], "color": [0.32, 0.27, 0.23], "collides": true},
+		{"id": "row_north", "rect": [-1260, -1360, 520, 26], "color": [0.31, 0.34, 0.29], "collides": true},
+		{"id": "row_south_w", "rect": [-1260, -996, 210, 26], "color": [0.31, 0.34, 0.29], "collides": true},
+		{"id": "row_south_e", "rect": [-958, -996, 218, 26], "color": [0.31, 0.34, 0.29], "collides": true},
+		{"id": "row_west", "rect": [-1260, -1360, 26, 390], "color": [0.31, 0.34, 0.29], "collides": true},
+		{"id": "row_east", "rect": [-766, -1360, 26, 390], "color": [0.31, 0.34, 0.29], "collides": true},
+		{"id": "row_room_divider", "rect": [-994, -1334, 22, 210], "color": [0.28, 0.31, 0.27], "collides": true},
+		{"id": "row_back_wall", "rect": [-1234, -1144, 240, 22], "color": [0.28, 0.31, 0.27], "collides": true},
+		{"id": "cedar_north", "rect": [-2040, 360, 560, 26], "color": [0.28, 0.34, 0.39], "collides": true},
+		{"id": "cedar_south_w", "rect": [-2040, 754, 250, 26], "color": [0.28, 0.34, 0.39], "collides": true},
+		{"id": "cedar_south_e", "rect": [-1700, 754, 220, 26], "color": [0.28, 0.34, 0.39], "collides": true},
+		{"id": "cedar_west", "rect": [-2040, 360, 26, 420], "color": [0.28, 0.34, 0.39], "collides": true},
+		{"id": "cedar_east", "rect": [-1506, 360, 26, 420], "color": [0.28, 0.34, 0.39], "collides": true},
+		{"id": "cedar_room_divider_a", "rect": [-1744, 386, 22, 180], "color": [0.25, 0.30, 0.35], "collides": true},
+		{"id": "cedar_room_divider_b", "rect": [-1744, 638, 22, 116], "color": [0.25, 0.30, 0.35], "collides": true},
+		{"id": "cedar_back_wall", "rect": [-2014, 596, 270, 22], "color": [0.25, 0.30, 0.35], "collides": true},
+		{"id": "duplex_north", "rect": [-1180, 380, 620, 26], "color": [0.34, 0.31, 0.36], "collides": true},
+		{"id": "duplex_south_w", "rect": [-1180, 784, 250, 26], "color": [0.34, 0.31, 0.36], "collides": true},
+		{"id": "duplex_south_mid", "rect": [-850, 784, 120, 26], "color": [0.34, 0.31, 0.36], "collides": true},
+		{"id": "duplex_south_e", "rect": [-650, 784, 90, 26], "color": [0.34, 0.31, 0.36], "collides": true},
+		{"id": "duplex_west", "rect": [-1180, 380, 26, 430], "color": [0.34, 0.31, 0.36], "collides": true},
+		{"id": "duplex_east", "rect": [-586, 380, 26, 430], "color": [0.34, 0.31, 0.36], "collides": true},
+		{"id": "duplex_center_a", "rect": [-874, 406, 22, 160], "color": [0.30, 0.27, 0.32], "collides": true},
+		{"id": "duplex_center_b", "rect": [-874, 640, 22, 144], "color": [0.30, 0.27, 0.32], "collides": true},
+		{"id": "pine_north", "rect": [1280, -1360, 560, 26], "color": [0.38, 0.30, 0.25], "collides": true},
+		{"id": "pine_south_w", "rect": [1280, -986, 250, 26], "color": [0.38, 0.30, 0.25], "collides": true},
+		{"id": "pine_south_e", "rect": [1620, -986, 220, 26], "color": [0.38, 0.30, 0.25], "collides": true},
+		{"id": "pine_west", "rect": [1280, -1360, 26, 400], "color": [0.38, 0.30, 0.25], "collides": true},
+		{"id": "pine_east", "rect": [1814, -1360, 26, 400], "color": [0.38, 0.30, 0.25], "collides": true},
+		{"id": "pine_room_divider_a", "rect": [1556, -1334, 22, 176], "color": [0.33, 0.27, 0.23], "collides": true},
+		{"id": "pine_room_divider_b", "rect": [1556, -1088, 22, 102], "color": [0.33, 0.27, 0.23], "collides": true},
+		{"id": "pine_back_wall", "rect": [1306, -1134, 250, 22], "color": [0.33, 0.27, 0.23], "collides": true},
+		{"id": "market_north", "rect": [-520, -1420, 760, 28], "color": [0.34, 0.40, 0.35], "collides": true},
+		{"id": "market_south_w", "rect": [-520, -928, 310, 28], "color": [0.34, 0.40, 0.35], "collides": true},
+		{"id": "market_south_e", "rect": [-80, -928, 320, 28], "color": [0.34, 0.40, 0.35], "collides": true},
+		{"id": "market_west", "rect": [-520, -1420, 28, 520], "color": [0.34, 0.40, 0.35], "collides": true},
+		{"id": "market_east", "rect": [212, -1420, 28, 520], "color": [0.34, 0.40, 0.35], "collides": true},
+		{"id": "market_back_room_a", "rect": [6, -1392, 24, 190], "color": [0.30, 0.36, 0.31], "collides": true},
+		{"id": "market_back_room_b", "rect": [6, -1120, 24, 192], "color": [0.30, 0.36, 0.31], "collides": true},
+		{"id": "market_storage_split", "rect": [30, -1174, 184, 24], "color": [0.30, 0.36, 0.31], "collides": true},
+		{"id": "hardware_north", "rect": [420, 360, 760, 28], "color": [0.40, 0.35, 0.27], "collides": true},
+		{"id": "hardware_south_w", "rect": [420, 852, 320, 28], "color": [0.40, 0.35, 0.27], "collides": true},
+		{"id": "hardware_south_e", "rect": [870, 852, 310, 28], "color": [0.40, 0.35, 0.27], "collides": true},
+		{"id": "hardware_west", "rect": [420, 360, 28, 520], "color": [0.40, 0.35, 0.27], "collides": true},
+		{"id": "hardware_east", "rect": [1152, 360, 28, 520], "color": [0.40, 0.35, 0.27], "collides": true},
+		{"id": "hardware_back_room_a", "rect": [946, 388, 24, 210], "color": [0.36, 0.31, 0.24], "collides": true},
+		{"id": "hardware_back_room_b", "rect": [946, 686, 24, 166], "color": [0.36, 0.31, 0.24], "collides": true},
+		{"id": "hardware_loading_wall", "rect": [448, 696, 498, 24], "color": [0.36, 0.31, 0.24], "collides": true},
+		{"id": "precinct_north", "rect": [1280, -420, 820, 30], "color": [0.30, 0.36, 0.45], "collides": true},
+		{"id": "precinct_south_w", "rect": [1280, 170, 350, 30], "color": [0.30, 0.36, 0.45], "collides": true},
+		{"id": "precinct_south_e", "rect": [1740, 170, 360, 30], "color": [0.30, 0.36, 0.45], "collides": true},
+		{"id": "precinct_west", "rect": [1280, -420, 30, 620], "color": [0.30, 0.36, 0.45], "collides": true},
+		{"id": "precinct_east", "rect": [2070, -420, 30, 620], "color": [0.30, 0.36, 0.45], "collides": true},
+		{"id": "precinct_lobby_split_a", "rect": [1666, -390, 24, 210], "color": [0.26, 0.32, 0.40], "collides": true},
+		{"id": "precinct_lobby_split_b", "rect": [1666, -90, 24, 260], "color": [0.26, 0.32, 0.40], "collides": true},
+		{"id": "precinct_mid_wall_a", "rect": [1310, -144, 230, 24], "color": [0.26, 0.32, 0.40], "collides": true},
+		{"id": "precinct_mid_wall_b", "rect": [1630, -144, 440, 24], "color": [0.26, 0.32, 0.40], "collides": true},
+		{"id": "precinct_holding_wall", "rect": [1586, -120, 24, 290], "color": [0.26, 0.32, 0.40], "collides": true}
+	],
+	"props": [
+		{"id": "pine_01", "type": "tree", "position": [1230, 900], "radius": 34, "collision_radius": 16, "color": [0.13, 0.34, 0.15], "collides": true},
+		{"id": "pine_02", "type": "tree", "position": [1350, 980], "radius": 42, "collision_radius": 18, "color": [0.11, 0.30, 0.14], "collides": true},
+		{"id": "pine_03", "type": "tree", "position": [1510, 900], "radius": 32, "collision_radius": 15, "color": [0.15, 0.38, 0.17], "collides": true},
+		{"id": "pine_04", "type": "tree", "position": [1700, 960], "radius": 46, "collision_radius": 20, "color": [0.10, 0.29, 0.13], "collides": true},
+		{"id": "pine_05", "type": "tree", "position": [1920, 920], "radius": 38, "collision_radius": 17, "color": [0.12, 0.33, 0.16], "collides": true},
+		{"id": "pine_06", "type": "tree", "position": [1280, 1160], "radius": 40, "collision_radius": 18, "color": [0.13, 0.35, 0.17], "collides": true},
+		{"id": "pine_07", "type": "tree", "position": [1460, 1220], "radius": 50, "collision_radius": 20, "color": [0.09, 0.27, 0.12], "collides": true},
+		{"id": "pine_08", "type": "tree", "position": [1660, 1160], "radius": 36, "collision_radius": 16, "color": [0.14, 0.36, 0.16], "collides": true},
+		{"id": "pine_09", "type": "tree", "position": [1840, 1240], "radius": 48, "collision_radius": 20, "color": [0.10, 0.30, 0.14], "collides": true},
+		{"id": "pine_10", "type": "tree", "position": [2040, 1140], "radius": 34, "collision_radius": 15, "color": [0.13, 0.34, 0.15], "collides": true},
+		{"id": "pine_11", "type": "tree", "position": [1360, 1460], "radius": 42, "collision_radius": 18, "color": [0.11, 0.32, 0.14], "collides": true},
+		{"id": "pine_12", "type": "tree", "position": [1580, 1500], "radius": 38, "collision_radius": 17, "color": [0.14, 0.37, 0.16], "collides": true},
+		{"id": "pine_13", "type": "tree", "position": [1800, 1440], "radius": 46, "collision_radius": 19, "color": [0.10, 0.29, 0.13], "collides": true},
+		{"id": "pine_14", "type": "tree", "position": [2020, 1500], "radius": 40, "collision_radius": 18, "color": [0.12, 0.33, 0.15], "collides": true}
 	],
 	"npcs": [
 		{
 			"id": "stoop_regular",
 			"name": "Mira",
 			"role": "neighbor",
-			"position": [-720, -80],
+			"position": [-1830, -870],
 			"health": 60,
 			"color": [0.70, 0.77, 0.82],
 			"dialogue": ["People notice patterns around here."]
@@ -80,7 +247,7 @@
 			"id": "night_vendor",
 			"name": "Oren",
 			"role": "vendor",
-			"position": [650, 330],
+			"position": [760, 610],
 			"health": 70,
 			"color": [0.78, 0.68, 0.55],
 			"weapon": {
@@ -91,6 +258,33 @@
 				"fire_cooldown": 0.55
 			},
 			"dialogue": ["Late hours, quiet hands."]
+		},
+		{
+			"id": "desk_officer",
+			"name": "Vale",
+			"role": "officer",
+			"faction": "law",
+			"position": [1460, -240],
+			"health": 90,
+			"color": [0.42, 0.55, 0.78],
+			"weapon": {
+				"name": "Service Pistol",
+				"damage": 10,
+				"projectile_speed": 680,
+				"projectile_lifetime": 1.0,
+				"fire_cooldown": 0.7
+			},
+			"ai": {
+				"enabled": true,
+				"faction": "law",
+				"hostile_factions": ["player"],
+				"detection_radius": 520,
+				"attack_range": 380,
+				"preferred_range": 280,
+				"chase_speed": 160,
+				"cover_health_fraction": 0.35
+			},
+			"dialogue": ["Keep it moving."]
 		}
 	],
 	"contacts": [
@@ -98,21 +292,21 @@
 			"id": "corner_supplier",
 			"name": "Corner Supplier",
 			"type": "supplier",
-			"position": [-280, -160],
+			"position": [-230, -1080],
 			"color": [0.95, 0.68, 0.20]
 		},
 		{
 			"id": "night_buyer",
 			"name": "Night Buyer",
 			"type": "buyer",
-			"position": [310, -80],
+			"position": [610, 690],
 			"color": [0.42, 0.82, 0.48]
 		},
 		{
 			"id": "quiet_fixer",
 			"name": "Quiet Fixer",
 			"type": "fixer",
-			"position": [30, 260],
+			"position": [-1040, 620],
 			"color": [0.58, 0.50, 0.92]
 		}
 	],
@@ -120,9 +314,16 @@
 		{
 			"id": "alley_intro",
 			"type": "message",
-			"rect": [-360, -80, 180, 160],
+			"rect": [-300, -80, 220, 180],
 			"once": true,
-			"message": "The alley gives you cover, but not privacy."
+			"message": "The side streets are wider now, but privacy is still rare."
+		},
+		{
+			"id": "woods_edge",
+			"type": "message",
+			"rect": [1120, 760, 1120, 160],
+			"once": true,
+			"message": "The pines swallow sound."
 		}
 	]
 }

@@ -28,6 +28,8 @@ The current scaffold implements:
 - Sell stock to a buyer.
 - Pay a fixer to lower heat.
 - Grow from neighborhood scale to larger scopes by accumulating cash.
+- Track district-level fictional markets with diverse goods, local prices, production recipes, consumer willingness bands, habit pressure, and slow trade between connected districts.
+- Track unlocks and triggered events through data-driven progression rules fed by gameplay facts like sales, item movement, days, production, and kills.
 
 This is deliberately small. It exists to prove input, state, interaction, and HUD flow.
 
@@ -50,12 +52,18 @@ This is deliberately small. It exists to prove input, state, interaction, and HU
 - Build systems behind simple interfaces so later AI passes can extend them safely.
 - Add tests or simulation scripts once the economy has enough rules to regress.
 - Store maps as JSON data under `maps/` and load them through `MapLoader`.
-- Map files should stay schema-light while prototyping: `buildings`, `walls`, `npcs`, `contacts`, and `triggers` are top-level arrays so new maps can add content without scene edits.
+- Map files should stay schema-light while prototyping: `buildings`, `walls`, `zones`, `props`, `npcs`, `contacts`, and `triggers` are top-level arrays so new maps can add content without scene edits.
+- Enterable buildings are floor records plus separate wall records. This keeps collision flexible enough for doors, rooms, and interiors without making a unique scene for every building.
+- Use `zones` for large area materials like roads and woods, and `props` for repeated small objects like trees.
 - Triggers are included in the map schema before they are fully active; future passes can attach gameplay behavior to those data records.
 - The in-game phone is the main expandable player interface. It starts with Messages, Map, and Bank apps.
 - The phone Map app must render from the same active map data as the playable world rather than maintaining a separate minimap layout.
+- The market simulation should stay abstract and fictionalized. Goods, recipes, consumer segments, districts, and trade routes live in JSON under `data/economy/` so price movement creates strategic signals without becoming real-world instruction.
+- Local markets advance in daily ticks: anchor supply, production, consumer demand, route trade, price recalculation, trend updates, and habit/desire updates.
+- Progression rules live in JSON under `data/progression/` and should consume generic events/metrics instead of being hardcoded into individual gameplay systems.
 - Character health and weapons are component-style scripts. Keep combat simple and data-driven until there is a clear need for richer AI or weapon inheritance.
 - Projectiles are the first weapon delivery type. Future weapons should extend data first, then specialized scripts only when behavior meaningfully differs.
+- Combat AI is component-style and opt-in from unit data. Units use explicit factions and hostile faction lists, then make first-pass decisions for sight, shooting, chasing, wounded cover-seeking, and optional follow-anchor cohesion.
 
 ## Tone
 

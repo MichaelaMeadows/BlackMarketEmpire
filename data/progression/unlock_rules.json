@@ -1,0 +1,56 @@
+{
+  "rules": [
+    {
+      "id": "first_real_money",
+      "type": "metric_threshold",
+      "metric": "sold_value",
+      "threshold": 100,
+      "actions": [
+        {"type": "unlock", "id": "bulk_buyer_intro"},
+        {"type": "event", "id": "bulk_buyer_message", "message": "A bulk buyer hears your name."}
+      ]
+    },
+    {
+      "id": "street_goods_route",
+      "type": "item_metric_threshold",
+      "metric": "sold_quantity",
+      "item_id": "street_goods",
+      "threshold": 12,
+      "actions": [
+        {"type": "unlock", "id": "street_goods_route"},
+        {"type": "event", "id": "street_goods_route_tip", "message": "A steady street goods route is forming."}
+      ]
+    },
+    {
+      "id": "first_blood_attention",
+      "type": "event_count_threshold",
+      "event_type": "kill",
+      "threshold": 1,
+      "actions": [
+        {"type": "unlock", "id": "heat_attention"},
+        {"type": "event", "id": "heat_attention_warning", "message": "Violence is drawing attention."}
+      ]
+    },
+    {
+      "id": "local_production_notice",
+      "type": "item_metric_threshold",
+      "metric": "crafted_quantity",
+      "item_id": "street_goods",
+      "threshold": 50,
+      "actions": [
+        {"type": "unlock", "id": "local_production"},
+        {"type": "event", "id": "local_production_notice", "message": "Local production is no longer background noise."}
+      ]
+    },
+    {
+      "id": "weekly_pressure_roll",
+      "type": "random_interval",
+      "interval_days": 7,
+      "chance": 0.25,
+      "repeat": true,
+      "actions": [
+        {"type": "event", "id": "weekly_pressure", "message": "Pressure shifts somewhere nearby."}
+      ]
+    }
+  ]
+}

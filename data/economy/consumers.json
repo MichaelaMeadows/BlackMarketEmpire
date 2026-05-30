@@ -1,0 +1,76 @@
+{
+  "segments": [
+    {
+      "id": "street_regulars",
+      "name": "Street Regulars",
+      "demands": {
+        "street_goods": {"quantity": 22, "min_price": 9, "max_price": 34, "elasticity": 0.85},
+        "night_vials": {"quantity": 5, "min_price": 35, "max_price": 105, "elasticity": 1.0},
+        "hush_tabs": {"quantity": 8, "min_price": 28, "max_price": 88, "elasticity": 0.95}
+      }
+    },
+    {
+      "id": "club_crowd",
+      "name": "Club Crowd",
+      "demands": {
+        "hush_tabs": {"quantity": 14, "min_price": 30, "max_price": 96, "elasticity": 0.8},
+        "glimmer_drops": {"quantity": 4, "min_price": 85, "max_price": 240, "elasticity": 1.1},
+        "counterfeit_luxuries": {"quantity": 7, "min_price": 30, "max_price": 95, "elasticity": 1.0}
+      }
+    },
+    {
+      "id": "collectors",
+      "name": "Collectors",
+      "demands": {
+        "art_fakes": {"quantity": 2, "min_price": 160, "max_price": 520, "elasticity": 1.2},
+        "mirror_silk": {"quantity": 7, "min_price": 25, "max_price": 85, "elasticity": 1.0},
+        "counterfeit_luxuries": {"quantity": 5, "min_price": 35, "max_price": 110, "elasticity": 1.05}
+      }
+    },
+    {
+      "id": "document_seekers",
+      "name": "Document Seekers",
+      "demands": {
+        "forged_papers": {"quantity": 4, "min_price": 82, "max_price": 260, "elasticity": 0.9},
+        "ledger_keys": {"quantity": 5, "min_price": 50, "max_price": 160, "elasticity": 1.0},
+        "quiet_access": {"quantity": 3, "min_price": 75, "max_price": 220, "elasticity": 1.15}
+      }
+    },
+    {
+      "id": "tech_runners",
+      "name": "Tech Runners",
+      "demands": {
+        "encrypted_devices": {"quantity": 9, "min_price": 64, "max_price": 175, "elasticity": 0.95},
+        "burner_parts": {"quantity": 12, "min_price": 26, "max_price": 84, "elasticity": 1.0},
+        "bootleg_media": {"quantity": 24, "min_price": 6, "max_price": 22, "elasticity": 0.75}
+      }
+    },
+    {
+      "id": "small_shops",
+      "name": "Small Shops",
+      "demands": {
+        "grocery_supplies": {"quantity": 55, "min_price": 6, "max_price": 14, "elasticity": 0.7},
+        "packaging_stock": {"quantity": 40, "min_price": 4, "max_price": 11, "elasticity": 0.8},
+        "clean_labels": {"quantity": 8, "min_price": 20, "max_price": 65, "elasticity": 1.0}
+      }
+    },
+    {
+      "id": "clinic_backdoors",
+      "name": "Clinic Backdoors",
+      "demands": {
+        "rare_meds": {"quantity": 7, "min_price": 55, "max_price": 170, "elasticity": 0.85},
+        "cold_storage": {"quantity": 5, "min_price": 48, "max_price": 145, "elasticity": 1.0},
+        "night_vials": {"quantity": 5, "min_price": 36, "max_price": 120, "elasticity": 0.95}
+      }
+    },
+    {
+      "id": "logistics_crews",
+      "name": "Logistics Crews",
+      "demands": {
+        "fuel_chits": {"quantity": 28, "min_price": 22, "max_price": 48, "elasticity": 0.8},
+        "route_access": {"quantity": 8, "min_price": 42, "max_price": 135, "elasticity": 1.0},
+        "safe_storage": {"quantity": 6, "min_price": 36, "max_price": 120, "elasticity": 1.05}
+      }
+    }
+  ]
+}

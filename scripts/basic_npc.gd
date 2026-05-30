@@ -4,17 +4,23 @@ signal died(npc: CharacterBody2D)
 
 const HEALTH_COMPONENT_SCRIPT := preload("res://scripts/health_component.gd")
 const GUN_COMPONENT_SCRIPT := preload("res://scripts/gun_component.gd")
+const HUMAN_MARKER_DRAWER := preload("res://scripts/human_marker_drawer.gd")
+const COMBAT_AI_SCRIPT := preload("res://scripts/combat_ai_controller.gd")
 
 var npc_name := "NPC"
 var npc_role := "neighbor"
+var faction := "neutral"
 var display_color := Color(0.70, 0.77, 0.82)
+var facing := Vector2.DOWN
 var health
 var gun
+var combat_ai
 var label: Label
 
 func _ready() -> void:
 	add_to_group("damageable")
 	add_to_group("npc")
+	add_to_group("combat_unit")
 
 	if health == null:
 		health = HEALTH_COMPONENT_SCRIPT.new()
@@ -34,6 +40,7 @@ func _ready() -> void:
 func setup(npc_data: Dictionary) -> void:
 	npc_name = str(npc_data.get("name", npc_name))
 	npc_role = str(npc_data.get("role", npc_role))
+	faction = str(npc_data.get("faction", faction))
 	display_color = _read_color(npc_data.get("color", []), display_color)
 
 	if health == null:
@@ -49,6 +56,9 @@ func setup(npc_data: Dictionary) -> void:
 	if npc_data.has("weapon"):
 		gun.setup(npc_data["weapon"])
 
+	if npc_data.has("ai"):
+		_ensure_ai_controller(npc_data["ai"])
+
 	if label != null:
 		label.text = npc_name
 	queue_redraw()
@@ -59,9 +69,23 @@ func apply_damage(amount: int) -> void:
 		health.apply_damage(amount)
 
 
+func notify_attacked_by(attacker: Node) -> void:
+	if combat_ai != null and combat_ai.has_method("notify_attacked_by"):
+		combat_ai.notify_attacked_by(attacker)
+
+
+func get_faction() -> String:
+	return faction
+
+
+func set_facing_direction(direction: Vector2) -> void:
+	if direction.length() > 0.0:
+		facing = direction.normalized()
+		queue_redraw()
+
+
 func _draw() -> void:
-	draw_circle(Vector2.ZERO, 16.0, display_color)
-	draw_circle(Vector2.ZERO, 8.0, Color(0.08, 0.08, 0.08))
+	HUMAN_MARKER_DRAWER.draw_human(self, display_color, facing)
 
 	if health != null:
 		var bar_width := 36.0
@@ -81,6 +105,15 @@ func _build_label() -> void:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", 13)
 	add_child(label)
+
+
+func _ensure_ai_controller(ai_data: Dictionary) -> void:
+	if combat_ai == null:
+		combat_ai = COMBAT_AI_SCRIPT.new()
+		add_child(combat_ai)
+	if ai_data.has("faction"):
+		faction = str(ai_data["faction"])
+	combat_ai.setup(self, ai_data)
 
 
 func _on_health_changed(_current_health: int, _max_health: int) -> void:

@@ -41,6 +41,9 @@ func _on_body_entered(body: Node) -> void:
 	if body == source:
 		return
 
+	if body.has_method("notify_attacked_by"):
+		body.notify_attacked_by(source)
+
 	if body.has_method("apply_damage"):
 		body.apply_damage(damage)
 

@@ -1,0 +1,53 @@
+{
+  "active_market_id": "rook_market",
+  "markets": [
+    {
+      "id": "rook_market",
+      "name": "Rook Market",
+      "tags": ["retail", "storage", "workshops"],
+      "inventory": {"street_goods": 140, "plain_wraps": 80, "route_access": 34, "safe_storage": 22, "quiet_access": 12, "clean_labels": 45, "bootleg_media": 90, "counterfeit_luxuries": 30},
+      "consumer_segments": {"street_regulars": 1.2, "small_shops": 0.8, "logistics_crews": 0.6},
+      "production_modifiers": {"local": 1.1, "cover": 1.0}
+    },
+    {
+      "id": "east_yards",
+      "name": "East Yards",
+      "tags": ["workshops", "storage"],
+      "inventory": {"repair_parts": 180, "industrial_supplies": 300, "fuel_chits": 120, "safe_storage": 60, "route_access": 55, "burner_parts": 50},
+      "consumer_segments": {"logistics_crews": 1.2, "tech_runners": 0.5, "small_shops": 0.5},
+      "production_modifiers": {"infrastructure": 1.25, "tools": 1.05}
+    },
+    {
+      "id": "glasswater",
+      "name": "Glasswater",
+      "tags": ["clinic", "storage"],
+      "inventory": {"rare_meds": 52, "cold_storage": 42, "night_vials": 40, "street_goods": 70, "plain_wraps": 50, "route_access": 36},
+      "consumer_segments": {"clinic_backdoors": 1.4, "street_regulars": 0.7, "document_seekers": 0.5},
+      "production_modifiers": {"scarce": 1.2, "make_night_vials": 1.25}
+    },
+    {
+      "id": "hillgate",
+      "name": "Hillgate",
+      "tags": ["retail", "print"],
+      "inventory": {"counterfeit_luxuries": 80, "mirror_silk": 60, "art_fakes": 18, "clean_labels": 85, "paper_forms": 160, "forged_papers": 35},
+      "consumer_segments": {"collectors": 1.3, "club_crowd": 0.8, "document_seekers": 1.0},
+      "production_modifiers": {"luxury": 1.2, "services": 1.1}
+    },
+    {
+      "id": "south_arcade",
+      "name": "South Arcade",
+      "tags": ["tech", "retail", "print"],
+      "inventory": {"encrypted_devices": 55, "burner_parts": 90, "ledger_keys": 30, "bootleg_media": 150, "hush_tabs": 50, "quiet_access": 20},
+      "consumer_segments": {"club_crowd": 1.1, "tech_runners": 1.3, "document_seekers": 0.7},
+      "production_modifiers": {"tools": 1.25, "consumer": 1.05}
+    },
+    {
+      "id": "ridge_heights",
+      "name": "Ridge Heights",
+      "tags": ["retail"],
+      "inventory": {"counterfeit_luxuries": 35, "art_fakes": 12, "street_goods": 20, "grocery_supplies": 180},
+      "consumer_segments": {"collectors": 0.8, "small_shops": 0.4},
+      "production_modifiers": {"luxury": 0.75}
+    }
+  ]
+}

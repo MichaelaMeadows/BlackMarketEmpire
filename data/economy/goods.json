@@ -1,0 +1,31 @@
+{
+  "goods": [
+    {"id": "industrial_supplies", "name": "Industrial Supplies", "category": "basic", "base_price": 12, "spread": 0.10, "volatility": 0.03, "basic_anchor": true, "anchor_min": 10, "anchor_max": 15, "anchor_supply": 900, "tags": ["legal", "anchor"]},
+    {"id": "grocery_supplies", "name": "Grocery Supplies", "category": "basic", "base_price": 8, "spread": 0.08, "volatility": 0.02, "basic_anchor": true, "anchor_min": 7, "anchor_max": 10, "anchor_supply": 1000, "tags": ["legal", "anchor"]},
+    {"id": "growing_supplies", "name": "Growing Supplies", "category": "basic", "base_price": 18, "spread": 0.12, "volatility": 0.04, "basic_anchor": true, "anchor_min": 15, "anchor_max": 23, "anchor_supply": 650, "tags": ["legal", "anchor"]},
+    {"id": "packaging_stock", "name": "Packaging Stock", "category": "basic", "base_price": 6, "spread": 0.08, "volatility": 0.02, "basic_anchor": true, "anchor_min": 5, "anchor_max": 8, "anchor_supply": 1100, "tags": ["legal", "anchor"]},
+    {"id": "fuel_chits", "name": "Fuel Chits", "category": "logistics", "base_price": 31, "spread": 0.16, "volatility": 0.06, "basic_anchor": true, "anchor_min": 26, "anchor_max": 39, "anchor_supply": 520, "tags": ["legal", "anchor", "transport"]},
+    {"id": "repair_parts", "name": "Repair Parts", "category": "basic", "base_price": 22, "spread": 0.12, "volatility": 0.04, "basic_anchor": true, "anchor_min": 18, "anchor_max": 28, "anchor_supply": 560, "tags": ["legal", "anchor"]},
+    {"id": "clean_textiles", "name": "Clean Textiles", "category": "basic", "base_price": 11, "spread": 0.10, "volatility": 0.03, "basic_anchor": true, "anchor_min": 9, "anchor_max": 14, "anchor_supply": 720, "tags": ["legal", "anchor"]},
+    {"id": "paper_forms", "name": "Paper Forms", "category": "basic", "base_price": 7, "spread": 0.08, "volatility": 0.02, "basic_anchor": true, "anchor_min": 6, "anchor_max": 9, "anchor_supply": 800, "tags": ["legal", "anchor"]},
+    {"id": "plain_wraps", "name": "Plain Wraps", "category": "cover", "base_price": 14, "spread": 0.18, "volatility": 0.06, "tags": ["cover"]},
+    {"id": "clean_labels", "name": "Clean Labels", "category": "cover", "base_price": 28, "spread": 0.22, "volatility": 0.08, "tags": ["cover"]},
+    {"id": "safe_storage", "name": "Safe Storage", "category": "infrastructure", "base_price": 48, "spread": 0.24, "volatility": 0.09, "tags": ["infrastructure"]},
+    {"id": "cold_storage", "name": "Cold Storage", "category": "infrastructure", "base_price": 66, "spread": 0.27, "volatility": 0.10, "tags": ["infrastructure", "storage"]},
+    {"id": "route_access", "name": "Route Access", "category": "infrastructure", "base_price": 55, "spread": 0.28, "volatility": 0.12, "tags": ["infrastructure", "transport"]},
+    {"id": "quiet_access", "name": "Quiet Access", "category": "pressure", "base_price": 95, "spread": 0.36, "volatility": 0.15, "tags": ["pressure"]},
+    {"id": "burner_parts", "name": "Burner Parts", "category": "tools", "base_price": 36, "spread": 0.20, "volatility": 0.08, "tags": ["tools"]},
+    {"id": "encrypted_devices", "name": "Encrypted Devices", "category": "tools", "base_price": 86, "spread": 0.26, "volatility": 0.10, "tags": ["tools"]},
+    {"id": "ledger_keys", "name": "Ledger Keys", "category": "tools", "base_price": 72, "spread": 0.30, "volatility": 0.12, "tags": ["tools", "cover"]},
+    {"id": "forged_papers", "name": "Forged Papers", "category": "services", "base_price": 110, "spread": 0.34, "volatility": 0.16, "tags": ["cover", "services"]},
+    {"id": "bootleg_media", "name": "Bootleg Media", "category": "consumer", "base_price": 9, "spread": 0.18, "volatility": 0.05, "tags": ["consumer"]},
+    {"id": "counterfeit_luxuries", "name": "Counterfeit Luxuries", "category": "consumer", "base_price": 42, "spread": 0.28, "volatility": 0.12, "tags": ["consumer", "luxury"]},
+    {"id": "mirror_silk", "name": "Mirror Silk", "category": "consumer", "base_price": 34, "spread": 0.24, "volatility": 0.10, "tags": ["consumer", "luxury"]},
+    {"id": "rare_meds", "name": "Rare Meds", "category": "scarce", "base_price": 74, "spread": 0.32, "volatility": 0.18, "tags": ["scarce"]},
+    {"id": "art_fakes", "name": "Art Fakes", "category": "luxury", "base_price": 250, "spread": 0.38, "volatility": 0.20, "tags": ["luxury"]},
+    {"id": "street_goods", "name": "Street Goods", "category": "local", "base_price": 15, "spread": 0.22, "volatility": 0.08, "habit_forming": true, "habit_gain": 0.030, "habit_decay": 0.012, "habit_max": 2.2, "tags": ["local", "habit"]},
+    {"id": "night_vials", "name": "Night Vials", "category": "local", "base_price": 58, "spread": 0.34, "volatility": 0.16, "habit_forming": true, "habit_gain": 0.036, "habit_decay": 0.014, "habit_max": 2.5, "tags": ["local", "habit"]},
+    {"id": "hush_tabs", "name": "Hush Tabs", "category": "local", "base_price": 46, "spread": 0.30, "volatility": 0.14, "habit_forming": true, "habit_gain": 0.032, "habit_decay": 0.013, "habit_max": 2.35, "tags": ["local", "habit"]},
+    {"id": "glimmer_drops", "name": "Glimmer Drops", "category": "scarce", "base_price": 130, "spread": 0.42, "volatility": 0.22, "habit_forming": true, "habit_gain": 0.040, "habit_decay": 0.018, "habit_max": 2.7, "tags": ["scarce", "habit"]}
+  ]
+}

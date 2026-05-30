@@ -12,11 +12,13 @@ var title_label: Label
 var app_content: VBoxContainer
 var map_view
 var bank_label: Label
+var market_label: Label
 
 func _ready() -> void:
 	visible = false
 	_build_ui()
 	GameState.state_changed.connect(_refresh_bank)
+	GameState.state_changed.connect(_refresh_market)
 	set_process(false)
 
 
@@ -92,6 +94,7 @@ func _build_ui() -> void:
 	_add_app_button(app_bar, "Messages", "messages")
 	_add_app_button(app_bar, "Map", "map")
 	_add_app_button(app_bar, "Bank", "bank")
+	_add_app_button(app_bar, "Market", "market")
 
 	app_content = VBoxContainer.new()
 	app_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -111,6 +114,8 @@ func _add_app_button(parent: HBoxContainer, label: String, app_id: String) -> vo
 
 func _show_app(app_id: String) -> void:
 	current_app = app_id
+	bank_label = null
+	market_label = null
 	for child in app_content.get_children():
 		child.queue_free()
 
@@ -121,6 +126,8 @@ func _show_app(app_id: String) -> void:
 			_build_map_app()
 		"bank":
 			_build_bank_app()
+		"market":
+			_build_market_app()
 		_:
 			_build_home_app()
 
@@ -167,13 +174,47 @@ func _build_bank_app() -> void:
 	_refresh_bank()
 
 
+func _build_market_app() -> void:
+	title_label.text = "Market"
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	app_content.add_child(scroll)
+
+	market_label = Label.new()
+	market_label.add_theme_font_size_override("font_size", 15)
+	market_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	scroll.add_child(market_label)
+	_refresh_market()
+
+
 func _refresh_bank() -> void:
 	if bank_label == null:
 		return
 
-	bank_label.text = "Cash: $%d\nHeat: %d%%\nStock: %d %s" % [
+	bank_label.text = "Cash: $%d\nHeat: %d%%\nStock: %d %s\nBuy: $%d\nSell: $%d" % [
 		GameState.cash,
 		GameState.heat,
 		GameState.get_stock(),
 		GameState.product_name,
+		GameState.get_current_buy_price(),
+		GameState.get_current_sell_price(),
 	]
+
+
+func _refresh_market() -> void:
+	if market_label == null:
+		return
+
+	var lines := []
+	lines.append("Local market: %s" % GameState.active_market_id.capitalize().replace("_", " "))
+	lines.append("")
+	for item in GameState.get_market_snapshot():
+		lines.append("%s  $%d  %s  %s  routes %s" % [
+			item.get("name", item.get("id", "Unknown")),
+			int(item.get("price", 0)),
+			str(item.get("trend", "flat")),
+			str(item.get("scarcity", "steady")),
+			str(item.get("route_pressure", "quiet")),
+		])
+
+	market_label.text = "\n".join(lines)

@@ -6,10 +6,12 @@ signal died
 
 const HEALTH_COMPONENT_SCRIPT := preload("res://scripts/health_component.gd")
 const GUN_COMPONENT_SCRIPT := preload("res://scripts/gun_component.gd")
+const HUMAN_MARKER_DRAWER := preload("res://scripts/human_marker_drawer.gd")
 
 @export var speed: float = 280.0
 @export var max_health: int = 100
 
+var faction := "player"
 var facing: Vector2 = Vector2.DOWN
 var aim_direction: Vector2 = Vector2.DOWN
 var controls_enabled := true
@@ -19,6 +21,7 @@ var gun
 func _ready() -> void:
 	add_to_group("damageable")
 	add_to_group("player")
+	add_to_group("combat_unit")
 
 	health = HEALTH_COMPONENT_SCRIPT.new()
 	add_child(health)
@@ -61,10 +64,14 @@ func apply_damage(amount: int) -> void:
 		health.apply_damage(amount)
 
 
+func get_faction() -> String:
+	return faction
+
+
 func _draw() -> void:
-	draw_circle(Vector2.ZERO, 14.0, Color(0.08, 0.74, 0.76))
-	draw_circle(Vector2.ZERO, 8.0, Color(0.04, 0.16, 0.18))
-	draw_line(Vector2.ZERO, aim_direction * 22.0, Color(0.94, 0.98, 1.0), 3.0)
+	HUMAN_MARKER_DRAWER.draw_human(self, Color(0.08, 0.74, 0.76), aim_direction, 0.95)
+	var hand_offset := Vector2(-aim_direction.y, aim_direction.x) * 8.0
+	draw_line(aim_direction * 4.0 + hand_offset, aim_direction * 24.0 + hand_offset, Color(0.94, 0.98, 1.0), 3.0, true)
 
 	if health != null:
 		var bar_width := 34.0
