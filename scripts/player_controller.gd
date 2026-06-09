@@ -4,8 +4,8 @@ class_name PlayerController
 signal health_changed(current_health: int, max_health: int)
 signal died
 
-const HEALTH_COMPONENT_SCRIPT := preload("res://scripts/health_component.gd")
-const GUN_COMPONENT_SCRIPT := preload("res://scripts/gun_component.gd")
+const HEALTH_COMPONENT_SCENE_PATH := "res://scenes/combat/HealthComponent.tscn"
+const GUN_COMPONENT_SCENE_PATH := "res://scenes/combat/GunComponent.tscn"
 const HUMAN_MARKER_DRAWER := preload("res://scripts/human_marker_drawer.gd")
 
 @export var speed: float = 280.0
@@ -23,13 +23,17 @@ func _ready() -> void:
 	add_to_group("player")
 	add_to_group("combat_unit")
 
-	health = HEALTH_COMPONENT_SCRIPT.new()
+	health = _instantiate_component_scene(HEALTH_COMPONENT_SCENE_PATH, ["setup", "get_health_fraction"])
+	if health == null:
+		return
 	add_child(health)
 	health.setup(max_health)
 	health.health_changed.connect(_on_health_changed)
 	health.died.connect(_on_died)
 
-	gun = GUN_COMPONENT_SCRIPT.new()
+	gun = _instantiate_component_scene(GUN_COMPONENT_SCENE_PATH, ["setup", "try_fire", "is_reloading"])
+	if gun == null:
+		return
 	add_child(gun)
 
 func _physics_process(_delta: float) -> void:
@@ -66,6 +70,28 @@ func apply_damage(amount: int) -> void:
 
 func get_faction() -> String:
 	return faction
+
+
+func _instantiate_component_scene(scene_path: String, required_methods: Array = []) -> Node:
+	var scene = load(scene_path)
+	if scene == null:
+		push_error("Failed to load component scene: %s" % scene_path)
+		return null
+
+	var component = scene.instantiate()
+	if component == null:
+		push_error("Failed to instantiate component scene: %s" % scene_path)
+		return null
+	for method_name in required_methods:
+		if not component.has_method(str(method_name)):
+			push_error("Component scene %s instantiated as %s without required method %s" % [
+				scene_path,
+				component.get_class(),
+				str(method_name),
+			])
+			component.free()
+			return null
+	return component
 
 
 func _draw() -> void:

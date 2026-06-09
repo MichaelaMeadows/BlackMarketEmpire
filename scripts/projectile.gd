@@ -18,12 +18,6 @@ func setup(new_position: Vector2, new_direction: Vector2, weapon_data: Dictionar
 func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 
-	var shape := CollisionShape2D.new()
-	var circle := CircleShape2D.new()
-	circle.radius = 4.0
-	shape.shape = circle
-	add_child(shape)
-
 
 func _physics_process(delta: float) -> void:
 	position += direction * speed * delta

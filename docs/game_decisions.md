@@ -63,7 +63,8 @@ This is deliberately small. It exists to prove input, state, interaction, and HU
 - Progression rules live in JSON under `data/progression/` and should consume generic events/metrics instead of being hardcoded into individual gameplay systems.
 - Character health and weapons are component-style scripts. Keep combat simple and data-driven until there is a clear need for richer AI or weapon inheritance.
 - Projectiles are the first weapon delivery type. Future weapons should extend data first, then specialized scripts only when behavior meaningfully differs.
-- Combat AI is component-style and opt-in from unit data. Units use explicit factions and hostile faction lists, then make first-pass decisions for sight, shooting, chasing, wounded cover-seeking, and optional follow-anchor cohesion.
+- Combat AI is component-style and opt-in from unit data. Units use explicit factions and hostile faction lists, then make decisions for sight, weapon-range engagement, reaction timing, target memory, shooting, chasing, scored cover, suppression response, squad target sharing, squad spacing, and optional follow-anchor cohesion.
+- Gunplay remains data-first: weapon type, accuracy, movement spread, recoil, magazines, reloads, bursts, projectile count, projectile arc, and effective/preferred range should be tuned through weapon dictionaries before adding specialized weapon scripts.
 
 ## Tone
 

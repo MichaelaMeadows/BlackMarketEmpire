@@ -252,10 +252,21 @@
 			"color": [0.78, 0.68, 0.55],
 			"weapon": {
 				"name": "Holdout",
+				"weapon_type": "pistol",
 				"damage": 12,
 				"projectile_speed": 620,
 				"projectile_lifetime": 1.0,
-				"fire_cooldown": 0.55
+				"fire_cooldown": 0.55,
+				"accuracy": 0.72,
+				"base_spread_degrees": 10,
+				"effective_range": 300,
+				"preferred_range": 180,
+				"magazine_size": 8,
+				"reload_time": 1.2,
+				"recoil_per_shot": 1.1,
+				"recoil_recovery_per_second": 4.5,
+				"max_recoil_spread_degrees": 7,
+				"aim_time": 0.12
 			},
 			"dialogue": ["Late hours, quiet hands."]
 		},
@@ -269,20 +280,35 @@
 			"color": [0.42, 0.55, 0.78],
 			"weapon": {
 				"name": "Service Pistol",
+				"weapon_type": "pistol",
 				"damage": 10,
 				"projectile_speed": 680,
 				"projectile_lifetime": 1.0,
-				"fire_cooldown": 0.7
+				"fire_cooldown": 0.7,
+				"accuracy": 0.78,
+				"base_spread_degrees": 8,
+				"effective_range": 360,
+				"preferred_range": 220,
+				"magazine_size": 12,
+				"reload_time": 1.35,
+				"recoil_per_shot": 1.0,
+				"recoil_recovery_per_second": 5.0,
+				"max_recoil_spread_degrees": 6,
+				"aim_time": 0.18
 			},
 			"ai": {
 				"enabled": true,
 				"faction": "law",
 				"hostile_factions": ["player"],
+				"role": "guard",
 				"detection_radius": 520,
-				"attack_range": 380,
-				"preferred_range": 280,
 				"chase_speed": 160,
-				"cover_health_fraction": 0.35
+				"cover_health_fraction": 0.35,
+				"reaction_time": 0.22,
+				"target_memory_seconds": 2.5,
+				"cover_reuse_seconds": 0.8,
+				"suppression_cover_threshold": 0.8,
+				"hold_distance_tolerance": 52
 			},
 			"dialogue": ["Keep it moving."]
 		}

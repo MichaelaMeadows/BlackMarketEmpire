@@ -2,14 +2,15 @@ extends CharacterBody2D
 
 signal died(npc: CharacterBody2D)
 
-const HEALTH_COMPONENT_SCRIPT := preload("res://scripts/health_component.gd")
-const GUN_COMPONENT_SCRIPT := preload("res://scripts/gun_component.gd")
 const HUMAN_MARKER_DRAWER := preload("res://scripts/human_marker_drawer.gd")
-const COMBAT_AI_SCRIPT := preload("res://scripts/combat_ai_controller.gd")
+const HEALTH_COMPONENT_SCENE_PATH := "res://scenes/combat/HealthComponent.tscn"
+const GUN_COMPONENT_SCENE_PATH := "res://scenes/combat/GunComponent.tscn"
+const COMBAT_AI_CONTROLLER_SCENE_PATH := "res://scenes/combat/CombatAiController.tscn"
 
 var npc_name := "NPC"
 var npc_role := "neighbor"
 var faction := "neutral"
+var squad_id := ""
 var display_color := Color(0.70, 0.77, 0.82)
 var facing := Vector2.DOWN
 var health
@@ -23,14 +24,18 @@ func _ready() -> void:
 	add_to_group("combat_unit")
 
 	if health == null:
-		health = HEALTH_COMPONENT_SCRIPT.new()
+		health = _instantiate_component_scene(HEALTH_COMPONENT_SCENE_PATH, ["setup", "get_health_fraction"])
+		if health == null:
+			return
 		add_child(health)
 		health.setup(60)
 		health.health_changed.connect(_on_health_changed)
 		health.died.connect(_on_died)
 
 	if gun == null:
-		gun = GUN_COMPONENT_SCRIPT.new()
+		gun = _instantiate_component_scene(GUN_COMPONENT_SCENE_PATH, ["setup", "try_fire", "is_reloading"])
+		if gun == null:
+			return
 		add_child(gun)
 
 	_build_label()
@@ -41,17 +46,22 @@ func setup(npc_data: Dictionary) -> void:
 	npc_name = str(npc_data.get("name", npc_name))
 	npc_role = str(npc_data.get("role", npc_role))
 	faction = str(npc_data.get("faction", faction))
+	squad_id = str(npc_data.get("squad_id", squad_id))
 	display_color = _read_color(npc_data.get("color", []), display_color)
 
 	if health == null:
-		health = HEALTH_COMPONENT_SCRIPT.new()
+		health = _instantiate_component_scene(HEALTH_COMPONENT_SCENE_PATH, ["setup", "get_health_fraction"])
+		if health == null:
+			return
 		add_child(health)
 		health.health_changed.connect(_on_health_changed)
 		health.died.connect(_on_died)
 	health.setup(int(npc_data.get("health", 60)))
 
 	if gun == null:
-		gun = GUN_COMPONENT_SCRIPT.new()
+		gun = _instantiate_component_scene(GUN_COMPONENT_SCENE_PATH, ["setup", "try_fire", "is_reloading"])
+		if gun == null:
+			return
 		add_child(gun)
 	if npc_data.has("weapon"):
 		gun.setup(npc_data["weapon"])
@@ -76,6 +86,10 @@ func notify_attacked_by(attacker: Node) -> void:
 
 func get_faction() -> String:
 	return faction
+
+
+func get_squad_id() -> String:
+	return squad_id
 
 
 func set_facing_direction(direction: Vector2) -> void:
@@ -109,11 +123,37 @@ func _build_label() -> void:
 
 func _ensure_ai_controller(ai_data: Dictionary) -> void:
 	if combat_ai == null:
-		combat_ai = COMBAT_AI_SCRIPT.new()
+		combat_ai = _instantiate_component_scene(COMBAT_AI_CONTROLLER_SCENE_PATH, ["setup", "tick_ai"])
+		if combat_ai == null:
+			return
 		add_child(combat_ai)
 	if ai_data.has("faction"):
 		faction = str(ai_data["faction"])
+	if ai_data.has("squad_id"):
+		squad_id = str(ai_data["squad_id"])
 	combat_ai.setup(self, ai_data)
+
+
+func _instantiate_component_scene(scene_path: String, required_methods: Array = []) -> Node:
+	var scene = load(scene_path)
+	if scene == null:
+		push_error("Failed to load component scene: %s" % scene_path)
+		return null
+
+	var component = scene.instantiate()
+	if component == null:
+		push_error("Failed to instantiate component scene: %s" % scene_path)
+		return null
+	for method_name in required_methods:
+		if not component.has_method(str(method_name)):
+			push_error("Component scene %s instantiated as %s without required method %s" % [
+				scene_path,
+				component.get_class(),
+				str(method_name),
+			])
+			component.free()
+			return null
+	return component
 
 
 func _on_health_changed(_current_health: int, _max_health: int) -> void:

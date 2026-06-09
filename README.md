@@ -35,7 +35,7 @@ The phone's Map app reads from the same loaded map data as the playable world, s
 
 Enterable buildings should use `buildings` as floor/outline data with `collides: false`, then use `walls` for exterior walls, doors, and room dividers. `tools/map_authoring_helper.gd` has small static helpers for generating exterior wall records with door gaps, room dividers, and trees.
 
-NPC map entries can include `health`, `faction`, optional `weapon` data, and optional `ai` data. Weapons currently support `damage`, `projectile_speed`, `projectile_lifetime`, and `fire_cooldown`. AI data can opt a unit into combat behavior with `enabled`, `hostile_factions`, `detection_radius`, `attack_range`, `chase_speed`, `cover_health_fraction`, and follow settings that can be assigned at runtime.
+NPC map entries can include `health`, `faction`, optional `weapon` data, and optional `ai` data. Weapons support `weapon_type`, damage/projectile timing, `accuracy`, movement/recoil spread, magazines/reload, bursts, multi-projectile shots, and effective/preferred ranges. AI data can opt a unit into combat behavior with `enabled`, `hostile_factions`, `role`, `detection_radius`, weapon range overrides, reaction/memory timing, cover/suppression settings, squad settings, and follow settings that can be assigned at runtime.
 
 ## Economy
 
@@ -54,6 +54,12 @@ Run all Godot test scripts with:
 ```
 
 The runner discovers `*test.gd` scripts in `tools/`, runs them with Godot headless, and stops on the first failure.
+
+Run the broader combat profile simulation with:
+
+```powershell
+godot --headless --script tools/combat_ai_simulation.gd
+```
 
 ## Code-First Notes
 
