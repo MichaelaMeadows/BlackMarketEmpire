@@ -3,6 +3,7 @@ extends SceneTree
 const BASIC_NPC_SCENE_PATH = "res://scenes/npc/BasicNpc.tscn"
 const COMBAT_AI_SCENE_PATH = "res://scenes/combat/CombatAiController.tscn"
 const GUN_COMPONENT_SCENE_PATH = "res://scenes/combat/GunComponent.tscn"
+const MELEE_COMPONENT_SCENE_PATH = "res://scenes/combat/MeleeComponent.tscn"
 
 var _failures: int = 0
 
@@ -24,6 +25,7 @@ func _run() -> void:
 	_test_movement_penalty_depends_on_weapon_type()
 	_test_recoil_increases_and_recovers()
 	_test_reload_blocks_fire_and_refills_magazine()
+	_test_melee_swing_hits_targets_inside_arc()
 	_test_seeded_shot_variance_is_deterministic()
 	_test_multi_projectile_weapon_fires_a_pattern()
 	_test_burst_weapon_fires_followup_shots()
@@ -268,6 +270,32 @@ func _test_reload_blocks_fire_and_refills_magazine() -> void:
 	_expect(gun.ammo_in_magazine == 2, "reload refills magazine")
 
 	_free_nodes([owner, gun])
+
+
+func _test_melee_swing_hits_targets_inside_arc() -> void:
+	var owner: CharacterBody2D = _new_unit("batter", "crew", Vector2.ZERO)
+	var target: CharacterBody2D = _new_unit("target", "rival", Vector2(55, 0))
+	var bystander: CharacterBody2D = _new_unit("bystander", "rival", Vector2(-45, 0))
+	var melee_weapon = _equip_melee_weapon(owner, {
+		"name": "Test Bat",
+		"damage": 20,
+		"range": 70,
+		"arc_degrees": 90,
+		"swing_cooldown": 0.4,
+		"swing_duration": 0.1,
+	})
+	if melee_weapon == null:
+		_free_nodes([owner, target, bystander])
+		return
+
+	_expect(melee_weapon.try_swing(owner, Vector2.RIGHT), "melee weapon swings")
+	_expect(_get_health(target).current_health == 80, "melee swing damages target inside front arc")
+	_expect(_get_health(bystander).current_health == 100, "melee swing ignores target behind owner")
+	_expect(not melee_weapon.try_swing(owner, Vector2.RIGHT), "melee cooldown blocks immediate second swing")
+	melee_weapon._process(0.41)
+	_expect(melee_weapon.try_swing(owner, Vector2.RIGHT), "melee weapon swings again after cooldown")
+
+	_free_nodes([owner, target, bystander])
 
 
 func _test_multi_projectile_weapon_fires_a_pattern() -> void:
@@ -638,6 +666,20 @@ func _new_gun(weapon_data: Dictionary):
 	return gun
 
 
+func _equip_melee_weapon(owner: Node, weapon_data: Dictionary):
+	var melee_weapon = _instantiate_scene(MELEE_COMPONENT_SCENE_PATH)
+	if melee_weapon == null:
+		return null
+	if not melee_weapon.has_method("setup") or not melee_weapon.has_method("try_swing") or not melee_weapon.has_method("is_swinging"):
+		_expect(false, "Melee component scene provides weapon methods")
+		melee_weapon.free()
+		return null
+	melee_weapon.setup(weapon_data)
+	owner.add_child(melee_weapon)
+	owner.set("melee_weapon", melee_weapon)
+	return melee_weapon
+
+
 func _instantiate_scene(path: String):
 	var scene = load(path)
 	if scene == null:
@@ -681,6 +723,10 @@ func _angle_degrees(direction: Vector2) -> float:
 
 func _get_gun(unit: Node):
 	return unit.get("gun")
+
+
+func _get_melee_weapon(unit: Node):
+	return unit.get("melee_weapon")
 
 
 func _get_health(unit: Node):

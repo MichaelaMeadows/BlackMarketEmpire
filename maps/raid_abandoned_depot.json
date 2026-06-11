@@ -1,0 +1,133 @@
+{
+	"schema_version": 2,
+	"id": "raid_abandoned_depot",
+	"name": "Abandoned Depot",
+	"bounds": [-1200, -900, 2400, 1800],
+	"background_color": [0.045, 0.050, 0.052],
+	"player_start": [-740, 380],
+	"grid": {
+		"enabled": true,
+		"spacing": 80,
+		"color": [0.085, 0.092, 0.096, 1.0]
+	},
+	"zones": [
+		{"id": "depot_yard", "name": "Depot Yard", "visual_id": "concrete_yard", "rect": [-1060, -640, 2120, 1280], "color": [0.074, 0.078, 0.074, 0.96]},
+		{"id": "service_lane", "name": "Service Lane", "visual_id": "asphalt_road", "rect": [-1200, 650, 2400, 180], "color": [0.060, 0.064, 0.066, 1.0]}
+	],
+	"buildings": [
+		{
+			"id": "depot_office",
+			"name": "Depot Office",
+			"kind": "warehouse",
+			"visual_id": "depot_office",
+			"floor_material": "store_concrete",
+			"wall_material": "cinder_block",
+			"rect": [-300, -360, 760, 520],
+			"color": [0.150, 0.158, 0.150],
+			"trim_color": [0.330, 0.330, 0.300],
+			"collides": false,
+			"rooms": [
+				{"id": "loading_floor", "name": "Loading Floor", "rect": [-274, -334, 430, 468]},
+				{"id": "office_cage", "name": "Office Cage", "rect": [180, -334, 254, 220]},
+				{"id": "stash_room", "name": "Stash Room", "rect": [180, -90, 254, 224]}
+			]
+		}
+	],
+	"walls": [
+		{"id": "depot_north", "rect": [-300, -360, 760, 30], "color": [0.330, 0.330, 0.300], "collides": true},
+		{"id": "depot_south_w", "rect": [-300, 130, 304, 30], "color": [0.330, 0.330, 0.300], "collides": true},
+		{"id": "depot_south_e", "rect": [116, 130, 344, 30], "color": [0.330, 0.330, 0.300], "collides": true},
+		{"id": "depot_west", "rect": [-300, -360, 30, 520], "color": [0.330, 0.330, 0.300], "collides": true},
+		{"id": "depot_east", "rect": [430, -360, 30, 520], "color": [0.330, 0.330, 0.300], "collides": true},
+		{"id": "depot_cage_split_a", "rect": [156, -330, 24, 170], "color": [0.280, 0.280, 0.255], "collides": true},
+		{"id": "depot_cage_split_b", "rect": [156, -40, 24, 174], "color": [0.280, 0.280, 0.255], "collides": true},
+		{"id": "depot_storage_split_w", "rect": [180, -114, 66, 24], "color": [0.280, 0.280, 0.255], "collides": true},
+		{"id": "depot_storage_split_e", "rect": [358, -114, 76, 24], "color": [0.280, 0.280, 0.255], "collides": true},
+		{"id": "yard_fence_west", "rect": [-1060, -640, 18, 1280], "color": [0.210, 0.200, 0.170], "collides": true},
+		{"id": "yard_fence_east", "rect": [1042, -640, 18, 1280], "color": [0.210, 0.200, 0.170], "collides": true},
+		{"id": "yard_fence_north", "rect": [-1060, -640, 2120, 18], "color": [0.210, 0.200, 0.170], "collides": true}
+	],
+	"props": [
+		{"id": "depot_crates_a", "type": "crate", "position": [-520, -120], "scale": 1.5, "visual_id": "wood_crates", "collides": false},
+		{"id": "depot_crates_b", "type": "crate", "position": [300, 20], "scale": 1.4, "visual_id": "wood_crates", "collides": false},
+		{"id": "depot_pallets", "type": "crate", "position": [-60, -250], "scale": 1.6, "visual_id": "wood_pallet", "collides": false},
+		{"id": "yard_light", "type": "streetlight", "position": [-780, 280], "scale": 1.1, "visual_id": "cool_streetlight", "collides": false},
+		{"id": "depot_window_light", "type": "window_light", "position": [220, 180], "scale": 1.1, "visual_id": "cold_window_light", "collides": false}
+	],
+	"npcs": [
+		{
+			"id": "depot_guard_a",
+			"name": "Depot Guard",
+			"role": "rival",
+			"faction": "rival",
+			"visual_id": "rival_hoodie",
+			"position": [-40, -120],
+			"health": 75,
+			"color": [0.78, 0.25, 0.22],
+			"ai": {
+				"enabled": true,
+				"faction": "rival",
+				"hostile_factions": ["player", "player_crew"],
+				"role": "guard",
+				"detection_radius": 340,
+				"reaction_time": 0.35,
+				"target_memory_seconds": 1.8
+			},
+			"melee_weapon": {
+				"name": "Pipe",
+				"weapon_type": "pipe",
+				"damage": 14,
+				"range": 62,
+				"arc_degrees": 85,
+				"swing_cooldown": 0.58,
+				"swing_duration": 0.14,
+				"knockback": 75
+			},
+			"dialogue": ["Depot is closed."]
+		},
+		{
+			"id": "depot_guard_b",
+			"name": "Depot Lookout",
+			"role": "rival",
+			"faction": "rival",
+			"visual_id": "rival_cap",
+			"position": [300, -190],
+			"health": 70,
+			"color": [0.74, 0.28, 0.24],
+			"weapon": {
+				"name": "Lookout Pistol",
+				"weapon_type": "pistol",
+				"damage": 8,
+				"projectile_speed": 640,
+				"projectile_lifetime": 1.0,
+				"fire_cooldown": 0.70,
+				"accuracy": 0.64,
+				"base_spread_degrees": 12,
+				"effective_range": 320,
+				"preferred_range": 200,
+				"magazine_size": 6,
+				"reload_time": 1.3
+			},
+			"ai": {
+				"enabled": true,
+				"faction": "rival",
+				"hostile_factions": ["player", "player_crew"],
+				"role": "guard",
+				"detection_radius": 330,
+				"reaction_time": 0.35,
+				"target_memory_seconds": 1.8
+			},
+			"dialogue": ["You lost?"]
+		}
+	],
+	"contacts": [],
+	"triggers": [
+		{
+			"id": "depot_entry",
+			"type": "message",
+			"rect": [-820, 240, 320, 320],
+			"once": true,
+			"message": "Benji keeps close. The depot is quiet enough to be dangerous."
+		}
+	]
+}

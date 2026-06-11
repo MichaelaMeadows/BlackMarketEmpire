@@ -1,0 +1,129 @@
+{
+	"schema_version": 2,
+	"id": "starter_house",
+	"name": "Cypress House",
+	"bounds": [-900, -700, 1800, 1400],
+	"background_color": [0.050, 0.058, 0.056],
+	"player_start": [-300, 120],
+	"base": {
+		"id": "cypress_house",
+		"name": "Cypress House",
+		"tier": "house",
+		"owned": true,
+		"next_base_hint": "Industrial building"
+	},
+	"grid": {
+		"enabled": true,
+		"spacing": 80,
+		"color": [0.090, 0.100, 0.096, 1.0]
+	},
+	"zones": [
+		{
+			"id": "front_walk",
+			"name": "Front Walk",
+			"visual_id": "concrete_path",
+			"rect": [-72, 420, 144, 260],
+			"color": [0.095, 0.098, 0.092, 0.95]
+		},
+		{
+			"id": "back_patch",
+			"name": "Back Patch",
+			"visual_id": "woods_grass",
+			"rect": [-720, -620, 1440, 220],
+			"color": [0.060, 0.130, 0.070, 0.70]
+		}
+	],
+	"buildings": [
+		{
+			"id": "starter_house",
+			"name": "Cypress House",
+			"kind": "house",
+			"visual_id": "starter_house",
+			"floor_material": "worn_wood",
+			"wall_material": "painted_plaster",
+			"rect": [-520, -360, 1040, 780],
+			"color": [0.155, 0.140, 0.118],
+			"trim_color": [0.345, 0.300, 0.240],
+			"collides": false,
+			"rooms": [
+				{"id": "living_room", "name": "Living Room", "rect": [-492, -332, 472, 292], "slot_ids": ["planning_table"]},
+				{"id": "kitchen", "name": "Kitchen", "rect": [36, -332, 456, 292], "slot_ids": ["basic_workbench"]},
+				{"id": "bedroom", "name": "Bedroom", "rect": [-492, 40, 300, 352], "slot_ids": ["crew_bunk"]},
+				{"id": "bathroom", "name": "Bathroom", "rect": [-164, 40, 172, 180], "slot_ids": []},
+				{"id": "basement_storage", "name": "Basement Storage", "rect": [36, 40, 456, 352], "slot_ids": ["stash_shelf", "supply_crates"]}
+			]
+		}
+	],
+	"walls": [
+		{"id": "house_north", "rect": [-520, -360, 1040, 28], "color": [0.345, 0.300, 0.240], "collides": true},
+		{"id": "house_south_w", "rect": [-520, 392, 444, 28], "color": [0.345, 0.300, 0.240], "collides": true},
+		{"id": "house_south_e", "rect": [76, 392, 444, 28], "color": [0.345, 0.300, 0.240], "collides": true},
+		{"id": "house_west", "rect": [-520, -360, 28, 780], "color": [0.345, 0.300, 0.240], "collides": true},
+		{"id": "house_east", "rect": [492, -360, 28, 780], "color": [0.345, 0.300, 0.240], "collides": true},
+		{"id": "house_top_room_split_n", "rect": [8, -332, 28, 84], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "house_top_room_split_s", "rect": [8, -136, 28, 96], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "house_center_wall_w", "rect": [-492, -40, 142, 28], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "house_center_wall_mid", "rect": [-238, -40, 418, 28], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "house_center_wall_e", "rect": [292, -40, 200, 28], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "house_bed_bath_split_n", "rect": [-192, 40, 28, 110], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "house_bed_bath_split_s", "rect": [-192, 262, 28, 130], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "house_bath_storage_split_n", "rect": [8, 40, 28, 70], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "house_bath_storage_split_s", "rect": [8, 222, 28, 170], "color": [0.295, 0.255, 0.210], "collides": true},
+		{"id": "yard_fence_north", "rect": [-700, -520, 1400, 18], "color": [0.220, 0.200, 0.160], "collides": true},
+		{"id": "yard_fence_west", "rect": [-700, -520, 18, 1160], "color": [0.220, 0.200, 0.160], "collides": true},
+		{"id": "yard_fence_east", "rect": [682, -520, 18, 1160], "color": [0.220, 0.200, 0.160], "collides": true},
+		{"id": "yard_fence_south_w", "rect": [-700, 622, 540, 18], "color": [0.220, 0.200, 0.160], "collides": true},
+		{"id": "yard_fence_south_e", "rect": [160, 622, 540, 18], "color": [0.220, 0.200, 0.160], "collides": true}
+	],
+	"facilities": [
+		{"id": "planning_table", "name": "Planning Table", "type": "planning", "room_id": "living_room", "slot_id": "planning_table", "position": [-300, -180], "capacity": 0, "visual_id": "planning_table", "color": [0.24, 0.17, 0.11]},
+		{"id": "basic_workbench", "name": "Basic Workbench", "type": "production", "room_id": "kitchen", "slot_id": "basic_workbench", "position": [270, -180], "capacity": 0, "visual_id": "workbench", "color": [0.28, 0.19, 0.12]},
+		{"id": "crew_bunk", "name": "Crew Bunk", "type": "staff", "room_id": "bedroom", "slot_id": "crew_bunk", "position": [-340, 180], "capacity": 1, "visual_id": "bunk", "color": [0.18, 0.20, 0.22]},
+		{"id": "stash_shelf", "name": "Stash Shelf", "type": "storage", "room_id": "basement_storage", "slot_id": "stash_shelf", "position": [170, 150], "capacity": 20, "unit": "kg", "visual_id": "shelves", "color": [0.20, 0.16, 0.11]},
+		{"id": "supply_crates", "name": "Supply Crates", "type": "utility", "room_id": "basement_storage", "slot_id": "supply_crates", "position": [355, 285], "capacity": 0, "visual_id": "crates", "color": [0.32, 0.22, 0.13]}
+	],
+	"props": [
+		{"id": "front_light", "type": "streetlight", "position": [-120, 520], "scale": 0.9, "visual_id": "porch_light", "collides": false},
+		{"id": "living_table_prop", "type": "furniture", "position": [-300, -180], "scale": 1.4, "color": [0.24, 0.17, 0.11], "visual_id": "planning_table", "collides": false},
+		{"id": "kitchen_bench_prop", "type": "furniture", "position": [270, -180], "scale": 1.3, "color": [0.28, 0.19, 0.12], "visual_id": "workbench", "collides": false},
+		{"id": "bed_bunk_prop", "type": "furniture", "position": [-340, 180], "scale": 1.5, "color": [0.18, 0.20, 0.22], "visual_id": "bunk", "collides": false},
+		{"id": "stash_shelf_prop", "type": "furniture", "position": [170, 150], "scale": 1.4, "color": [0.20, 0.16, 0.11], "visual_id": "shelves", "collides": false},
+		{"id": "supply_crates_prop", "type": "crate", "position": [355, 285], "scale": 1.4, "visual_id": "wood_crates", "collides": false},
+		{"id": "back_tree_a", "type": "tree", "position": [-560, -450], "radius": 36, "collision_radius": 16, "color": [0.12, 0.31, 0.15], "collides": true},
+		{"id": "back_tree_b", "type": "tree", "position": [560, -455], "radius": 42, "collision_radius": 18, "color": [0.10, 0.28, 0.13], "collides": true}
+	],
+	"npcs": [
+		{
+			"id": "benji_runner",
+			"name": "Benji",
+			"role": "crew",
+			"faction": "player_crew",
+			"visual_id": "crew_jacket",
+			"position": [-300, -100],
+			"health": 85,
+			"color": [0.28, 0.68, 0.62],
+			"staff": {"job": "Runner", "status": "Ready", "upkeep": 10, "task_types": ["transport"]},
+			"dialogue": ["Ten a week, and I can move simple stuff."]
+		}
+	],
+	"contacts": [],
+	"raid_targets": [
+		{
+			"id": "abandoned_depot",
+			"name": "Abandoned Depot",
+			"path": "res://maps/raid_abandoned_depot.json",
+			"difficulty": 1,
+			"reward_hint": "Supplies and cash",
+			"crew_required": 1
+		}
+	],
+	"triggers": [
+		{
+			"id": "starter_house_intro",
+			"type": "message",
+			"rect": [-520, -360, 1040, 780],
+			"once": true,
+			"message": "This house is small, but it is yours. Every room can become part of the operation."
+		}
+	]
+}

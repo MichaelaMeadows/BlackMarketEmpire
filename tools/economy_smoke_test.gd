@@ -233,8 +233,8 @@ func _test_game_state_uses_active_district_prices() -> void:
 	state._ready()
 	var expected_buy: int = int(state.market.get_buy_price(state.active_market_id, "street_goods"))
 	var expected_sell: int = int(state.market.get_sell_price(state.active_market_id, "street_goods"))
-	_expect(state.get_current_buy_price() == expected_buy, "GameState buy price uses active district")
-	_expect(state.get_current_sell_price() == expected_sell, "GameState sell price uses active district")
+	_expect(state.get_current_buy_price("street_goods") == expected_buy, "GameState simulated buy price uses active district")
+	_expect(state.get_current_sell_price("street_goods") == expected_sell, "GameState simulated sell price uses active district")
 	state.free()
 
 

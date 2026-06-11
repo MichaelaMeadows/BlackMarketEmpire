@@ -2,9 +2,10 @@ extends CharacterBody2D
 
 signal died(npc: CharacterBody2D)
 
-const HUMAN_MARKER_DRAWER := preload("res://scripts/human_marker_drawer.gd")
+const CHARACTER_VISUAL_PATH := "res://scripts/visuals/character_visual_2d.gd"
 const HEALTH_COMPONENT_SCENE_PATH := "res://scenes/combat/HealthComponent.tscn"
 const GUN_COMPONENT_SCENE_PATH := "res://scenes/combat/GunComponent.tscn"
+const MELEE_COMPONENT_SCENE_PATH := "res://scenes/combat/MeleeComponent.tscn"
 const COMBAT_AI_CONTROLLER_SCENE_PATH := "res://scenes/combat/CombatAiController.tscn"
 
 var npc_name := "NPC"
@@ -15,13 +16,19 @@ var display_color := Color(0.70, 0.77, 0.82)
 var facing := Vector2.DOWN
 var health
 var gun
+var melee_weapon
 var combat_ai
+var visual
 var label: Label
+var _fire_flash_remaining := 0.0
 
 func _ready() -> void:
 	add_to_group("damageable")
 	add_to_group("npc")
 	add_to_group("combat_unit")
+	z_index = 20
+
+	_create_visual()
 
 	if health == null:
 		health = _instantiate_component_scene(HEALTH_COMPONENT_SCENE_PATH, ["setup", "get_health_fraction"])
@@ -39,7 +46,19 @@ func _ready() -> void:
 		add_child(gun)
 
 	_build_label()
-	queue_redraw()
+	_update_visual()
+
+
+func _physics_process(delta: float) -> void:
+	_fire_flash_remaining = max(0.0, _fire_flash_remaining - delta)
+	var fired_recently := false
+	if gun != null:
+		var cooldown = gun.get("cooldown_remaining")
+		var fire_cooldown = gun.get("fire_cooldown")
+		fired_recently = cooldown != null and fire_cooldown != null and float(cooldown) > max(0.0, float(fire_cooldown) - 0.14)
+	if fired_recently:
+		_fire_flash_remaining = 0.10
+	_update_visual()
 
 
 func setup(npc_data: Dictionary) -> void:
@@ -48,6 +67,8 @@ func setup(npc_data: Dictionary) -> void:
 	faction = str(npc_data.get("faction", faction))
 	squad_id = str(npc_data.get("squad_id", squad_id))
 	display_color = _read_color(npc_data.get("color", []), display_color)
+	if visual != null:
+		visual.setup(str(npc_data.get("visual_id", "npc_%s" % npc_role)), display_color, Color(0.88, 0.28, 0.22))
 
 	if health == null:
 		health = _instantiate_component_scene(HEALTH_COMPONENT_SCENE_PATH, ["setup", "get_health_fraction"])
@@ -66,12 +87,20 @@ func setup(npc_data: Dictionary) -> void:
 	if npc_data.has("weapon"):
 		gun.setup(npc_data["weapon"])
 
+	if npc_data.has("melee_weapon"):
+		if melee_weapon == null:
+			melee_weapon = _instantiate_component_scene(MELEE_COMPONENT_SCENE_PATH, ["setup", "try_swing", "is_swinging"])
+			if melee_weapon == null:
+				return
+			add_child(melee_weapon)
+		melee_weapon.setup(npc_data["melee_weapon"])
+
 	if npc_data.has("ai"):
 		_ensure_ai_controller(npc_data["ai"])
 
 	if label != null:
 		label.text = npc_name
-	queue_redraw()
+	_update_visual()
 
 
 func apply_damage(amount: int) -> void:
@@ -95,17 +124,7 @@ func get_squad_id() -> String:
 func set_facing_direction(direction: Vector2) -> void:
 	if direction.length() > 0.0:
 		facing = direction.normalized()
-		queue_redraw()
-
-
-func _draw() -> void:
-	HUMAN_MARKER_DRAWER.draw_human(self, display_color, facing)
-
-	if health != null:
-		var bar_width := 36.0
-		var bar_position := Vector2(-bar_width * 0.5, -28.0)
-		draw_rect(Rect2(bar_position, Vector2(bar_width, 4.0)), Color(0.12, 0.12, 0.12))
-		draw_rect(Rect2(bar_position, Vector2(bar_width * health.get_health_fraction(), 4.0)), Color(0.88, 0.26, 0.20))
+		_update_visual()
 
 
 func _build_label() -> void:
@@ -118,6 +137,7 @@ func _build_label() -> void:
 	label.size = Vector2(80.0, 22.0)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", 13)
+	label.modulate = Color(0.82, 0.86, 0.82, 0.58)
 	add_child(label)
 
 
@@ -157,10 +177,11 @@ func _instantiate_component_scene(scene_path: String, required_methods: Array = 
 
 
 func _on_health_changed(_current_health: int, _max_health: int) -> void:
-	queue_redraw()
+	_update_visual()
 
 
 func _on_died() -> void:
+	_update_visual()
 	died.emit(self)
 	queue_free()
 
@@ -170,3 +191,26 @@ func _read_color(value: Variant, fallback: Color) -> Color:
 		var alpha: float = float(value[3]) if value.size() >= 4 else 1.0
 		return Color(float(value[0]), float(value[1]), float(value[2]), alpha)
 	return fallback
+
+
+func _create_visual() -> void:
+	if visual != null or DisplayServer.get_name() == "headless":
+		return
+	var visual_script = load(CHARACTER_VISUAL_PATH)
+	if visual_script == null:
+		return
+	visual = visual_script.new()
+	visual.setup("npc_%s" % npc_role, display_color, Color(0.88, 0.28, 0.22))
+	add_child(visual)
+
+
+func _update_visual() -> void:
+	if visual == null:
+		return
+	var health_fraction := 1.0
+	var is_dead := false
+	if health != null:
+		health_fraction = health.get_health_fraction()
+		var current_health = health.get("current_health")
+		is_dead = current_health != null and int(current_health) <= 0
+	visual.set_visual_state(facing, facing, velocity, health_fraction, is_dead, _fire_flash_remaining > 0.0)

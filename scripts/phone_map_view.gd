@@ -1,12 +1,14 @@
 extends Control
 
-const MAP_BACKGROUND := Color(0.035, 0.045, 0.05)
-const BUILDING_COLOR := Color(0.30, 0.34, 0.36)
-const WALL_COLOR := Color(0.54, 0.56, 0.52)
-const ZONE_COLOR := Color(0.14, 0.30, 0.15, 0.7)
-const PROP_COLOR := Color(0.16, 0.42, 0.20)
+const MAP_BACKGROUND := Color(0.020, 0.026, 0.030)
+const MAP_SURFACE := Color(0.055, 0.064, 0.066)
+const BUILDING_COLOR := Color(0.24, 0.27, 0.28)
+const WALL_COLOR := Color(0.68, 0.66, 0.58)
+const ZONE_COLOR := Color(0.10, 0.23, 0.12, 0.72)
+const ROAD_COLOR := Color(0.075, 0.080, 0.082)
+const PROP_COLOR := Color(0.18, 0.42, 0.20)
 const NPC_COLOR := Color(0.72, 0.78, 0.82)
-const CONTACT_COLOR := Color(0.94, 0.76, 0.28)
+const CONTACT_COLOR := Color(0.94, 0.72, 0.24)
 const PLAYER_COLOR := Color(0.08, 0.82, 0.84)
 
 var map_data: Dictionary = {}
@@ -28,16 +30,16 @@ func _draw() -> void:
 
 	var map_rect: Rect2 = _get_map_rect()
 	draw_rect(Rect2(Vector2.ZERO, size), MAP_BACKGROUND)
-	draw_rect(map_rect, Color(0.07, 0.085, 0.09))
+	draw_rect(map_rect, MAP_SURFACE)
+	draw_rect(map_rect, Color(0.60, 0.72, 0.70, 0.18), false, 1.0)
 	_draw_grid(map_rect)
 	_draw_rect_items("zones", map_rect, ZONE_COLOR)
 	_draw_rect_items("buildings", map_rect, BUILDING_COLOR)
 	_draw_rect_items("walls", map_rect, WALL_COLOR)
 	_draw_props(map_rect)
-	_draw_points("npcs", map_rect, NPC_COLOR, 3.0)
-	_draw_points("contacts", map_rect, CONTACT_COLOR, 4.5)
-	draw_circle(_world_to_map(player_position, map_rect), 5.5, PLAYER_COLOR)
-	draw_circle(_world_to_map(player_position, map_rect), 8.0, Color(0.08, 0.82, 0.84, 0.22))
+	_draw_npcs(map_rect)
+	_draw_contacts(map_rect)
+	_draw_player_marker(_world_to_map(player_position, map_rect))
 
 
 func _draw_grid(map_rect: Rect2) -> void:
@@ -65,20 +67,49 @@ func _draw_rect_items(collection_name: String, map_rect: Rect2, fallback_color: 
 			_world_to_map(world_rect.position, map_rect),
 			_world_to_map(world_rect.end, map_rect) - _world_to_map(world_rect.position, map_rect)
 		)
-		draw_rect(map_item_rect, _read_color(item.get("color", []), fallback_color))
-		draw_rect(map_item_rect, Color(0.82, 0.86, 0.82, 0.35), false, 1.0)
-
-
-func _draw_points(collection_name: String, map_rect: Rect2, fallback_color: Color, radius: float) -> void:
-	for item in map_data.get(collection_name, []):
-		var position: Vector2 = _world_to_map(_read_vector2(item.get("position", [0.0, 0.0])), map_rect)
-		draw_circle(position, radius, _read_color(item.get("color", []), fallback_color))
+		var visual_id := str(item.get("visual_id", item.get("id", "")))
+		var color := ROAD_COLOR if visual_id.contains("road") else _read_color(item.get("color", []), fallback_color)
+		draw_rect(map_item_rect, color)
+		draw_rect(map_item_rect, Color(0.82, 0.86, 0.78, 0.22), false, 1.0)
 
 
 func _draw_props(map_rect: Rect2) -> void:
 	for item in map_data.get("props", []):
 		var position: Vector2 = _world_to_map(_read_vector2(item.get("position", [0.0, 0.0])), map_rect)
-		draw_circle(position, 2.5, _read_color(item.get("color", []), PROP_COLOR))
+		match str(item.get("type", "")):
+			"streetlight":
+				draw_circle(position, 2.5, Color(0.45, 0.68, 0.90, 0.86))
+			"trash", "crate", "furniture":
+				draw_rect(Rect2(position - Vector2(1.8, 1.8), Vector2(3.6, 3.6)), Color(0.42, 0.34, 0.24, 0.72))
+			_:
+				draw_circle(position, 2.2, _read_color(item.get("color", []), PROP_COLOR))
+
+
+func _draw_npcs(map_rect: Rect2) -> void:
+	for item in map_data.get("npcs", []):
+		var position: Vector2 = _world_to_map(_read_vector2(item.get("position", [0.0, 0.0])), map_rect)
+		draw_circle(position, 3.2, _read_color(item.get("color", []), NPC_COLOR))
+		draw_circle(position, 4.8, Color(0.72, 0.78, 0.82, 0.16))
+
+
+func _draw_contacts(map_rect: Rect2) -> void:
+	for item in map_data.get("contacts", []):
+		var position: Vector2 = _world_to_map(_read_vector2(item.get("position", [0.0, 0.0])), map_rect)
+		var color := _read_color(item.get("color", []), CONTACT_COLOR)
+		var diamond := PackedVector2Array([
+			position + Vector2(0.0, -5.0),
+			position + Vector2(5.0, 0.0),
+			position + Vector2(0.0, 5.0),
+			position + Vector2(-5.0, 0.0),
+		])
+		draw_colored_polygon(diamond, color)
+		draw_polyline(PackedVector2Array([diamond[0], diamond[1], diamond[2], diamond[3], diamond[0]]), Color(0.02, 0.025, 0.03), 1.0)
+
+
+func _draw_player_marker(position: Vector2) -> void:
+	draw_circle(position, 8.0, Color(0.08, 0.82, 0.84, 0.20))
+	draw_circle(position, 5.0, PLAYER_COLOR)
+	draw_circle(position, 2.0, Color(0.02, 0.03, 0.035))
 
 
 func _get_map_rect() -> Rect2:

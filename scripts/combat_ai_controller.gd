@@ -365,6 +365,14 @@ func _stop() -> void:
 
 func _fire_at(target: Node2D) -> void:
 	var direction: Vector2 = _aim_at(target)
+	var melee_weapon = _get_melee_weapon()
+	if melee_weapon != null and melee_weapon.has_method("try_swing"):
+		var melee_range := float(melee_weapon.get("range"))
+		if owner_unit.global_position.distance_to(target.global_position) <= melee_range:
+			if melee_weapon.try_swing(owner_unit, direction):
+				aim_confidence = max(0.0, aim_confidence - 0.08)
+				return
+
 	var gun = _get_gun()
 	if gun != null and gun.has_method("try_fire"):
 		if gun.try_fire(owner_unit, direction):
@@ -574,6 +582,12 @@ func _get_gun():
 	if owner_unit == null:
 		return null
 	return owner_unit.get("gun")
+
+
+func _get_melee_weapon():
+	if owner_unit == null:
+		return null
+	return owner_unit.get("melee_weapon")
 
 
 func _is_reloading() -> bool:

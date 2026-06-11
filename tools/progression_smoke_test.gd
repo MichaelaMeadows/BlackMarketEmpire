@@ -120,7 +120,7 @@ func _test_game_state_records_sale_progress() -> void:
 	var state = GAME_STATE_SCRIPT.new()
 	state._ready()
 	state.inventory["street_goods"] = 20
-	state.sell_to_buyer(12, 10)
+	state.sell_to_buyer(12, 10, "street_goods")
 	_expect(state.is_unlocked("bulk_buyer_intro"), "GameState sale records value progression")
 	_expect(state.is_unlocked("street_goods_route"), "GameState sale records item quantity progression")
 	state.free()

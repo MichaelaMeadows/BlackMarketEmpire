@@ -6,7 +6,8 @@ signal died
 
 const HEALTH_COMPONENT_SCENE_PATH := "res://scenes/combat/HealthComponent.tscn"
 const GUN_COMPONENT_SCENE_PATH := "res://scenes/combat/GunComponent.tscn"
-const HUMAN_MARKER_DRAWER := preload("res://scripts/human_marker_drawer.gd")
+const MELEE_COMPONENT_SCENE_PATH := "res://scenes/combat/MeleeComponent.tscn"
+const CHARACTER_VISUAL_PATH := "res://scripts/visuals/character_visual_2d.gd"
 
 @export var speed: float = 280.0
 @export var max_health: int = 100
@@ -17,11 +18,17 @@ var aim_direction: Vector2 = Vector2.DOWN
 var controls_enabled := true
 var health
 var gun
+var melee_weapon
+var visual
+var _fire_flash_remaining := 0.0
 
 func _ready() -> void:
 	add_to_group("damageable")
 	add_to_group("player")
 	add_to_group("combat_unit")
+	z_index = 20
+
+	_create_visual()
 
 	health = _instantiate_component_scene(HEALTH_COMPONENT_SCENE_PATH, ["setup", "get_health_fraction"])
 	if health == null:
@@ -36,10 +43,28 @@ func _ready() -> void:
 		return
 	add_child(gun)
 
-func _physics_process(_delta: float) -> void:
+	melee_weapon = _instantiate_component_scene(MELEE_COMPONENT_SCENE_PATH, ["setup", "try_swing", "is_swinging"])
+	if melee_weapon == null:
+		return
+	add_child(melee_weapon)
+	melee_weapon.setup({
+		"name": "Baseball Bat",
+		"weapon_type": "bat",
+		"damage": 22,
+		"range": 76,
+		"arc_degrees": 105,
+		"swing_cooldown": 0.55,
+		"swing_duration": 0.16,
+		"knockback": 120,
+	})
+	_update_visual()
+
+func _physics_process(delta: float) -> void:
+	_fire_flash_remaining = max(0.0, _fire_flash_remaining - delta)
 	if not controls_enabled:
 		velocity = Vector2.ZERO
 		move_and_slide()
+		_update_visual()
 		return
 
 	var input_vector := Input.get_vector("move_left", "move_right", "move_up", "move_down")
@@ -49,18 +74,37 @@ func _physics_process(_delta: float) -> void:
 	_update_aim_direction()
 	velocity = input_vector * speed
 	move_and_slide()
-	queue_redraw()
+	_update_visual()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if controls_enabled and event.is_action_pressed("fire"):
 		fire_weapon()
+	elif controls_enabled and event.is_action_pressed("reload"):
+		reload_weapon()
+	elif controls_enabled and event.is_action_pressed("melee"):
+		swing_melee()
 
 
 func fire_weapon() -> void:
 	if gun != null:
 		_update_aim_direction()
-		gun.try_fire(self, aim_direction)
+		if gun.try_fire(self, aim_direction):
+			_fire_flash_remaining = 0.12
+			_update_visual()
+
+
+func reload_weapon() -> bool:
+	if gun != null and gun.has_method("start_reload"):
+		return gun.start_reload()
+	return false
+
+
+func swing_melee() -> bool:
+	if melee_weapon == null or not melee_weapon.has_method("try_swing"):
+		return false
+	_update_aim_direction()
+	return melee_weapon.try_swing(self, aim_direction)
 
 
 func apply_damage(amount: int) -> void:
@@ -94,29 +138,41 @@ func _instantiate_component_scene(scene_path: String, required_methods: Array = 
 	return component
 
 
-func _draw() -> void:
-	HUMAN_MARKER_DRAWER.draw_human(self, Color(0.08, 0.74, 0.76), aim_direction, 0.95)
-	var hand_offset := Vector2(-aim_direction.y, aim_direction.x) * 8.0
-	draw_line(aim_direction * 4.0 + hand_offset, aim_direction * 24.0 + hand_offset, Color(0.94, 0.98, 1.0), 3.0, true)
-
-	if health != null:
-		var bar_width := 34.0
-		var bar_position := Vector2(-bar_width * 0.5, -30.0)
-		draw_rect(Rect2(bar_position, Vector2(bar_width, 4.0)), Color(0.12, 0.12, 0.12))
-		draw_rect(Rect2(bar_position, Vector2(bar_width * health.get_health_fraction(), 4.0)), Color(0.20, 0.88, 0.58))
-
-
 func _on_health_changed(current_health: int, current_max_health: int) -> void:
 	health_changed.emit(current_health, current_max_health)
-	queue_redraw()
+	_update_visual()
 
 
 func _on_died() -> void:
 	died.emit()
 	controls_enabled = false
+	_update_visual()
 
 
 func _update_aim_direction() -> void:
 	var mouse_direction := get_global_mouse_position() - global_position
 	if mouse_direction.length() > 0.0:
 		aim_direction = mouse_direction.normalized()
+
+
+func _update_visual() -> void:
+	if visual == null:
+		return
+	var health_fraction := 1.0
+	var is_dead := false
+	if health != null:
+		health_fraction = health.get_health_fraction()
+		var current_health = health.get("current_health")
+		is_dead = current_health != null and int(current_health) <= 0
+	visual.set_visual_state(facing, aim_direction, velocity, health_fraction, is_dead, _fire_flash_remaining > 0.0)
+
+
+func _create_visual() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var visual_script = load(CHARACTER_VISUAL_PATH)
+	if visual_script == null:
+		return
+	visual = visual_script.new()
+	visual.setup("player", Color(0.08, 0.74, 0.76), Color(0.20, 0.88, 0.58))
+	add_child(visual)

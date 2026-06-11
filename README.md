@@ -1,15 +1,16 @@
 # Black Market Empire
 
-A code-first Godot 4 prototype for a top-down 2D empire-building game.
+A code-first Godot 4 prototype for a top-down 2D base-building and tactical empire game.
 
-You start as a small-time neighborhood dealer and grow through higher levels of abstraction: neighborhood, city, nation, and global empire. The first scaffold is intentionally simple: a top-down player, three contacts, basic trade actions, and state that can grow into deeper systems.
+You start in a single owned house with $100, unemployment benefits, one runner named Benji, and 20 KG of base inventory capacity. Over time you grow into larger bases: industrial buildings, compounds, and eventually broader operational hubs. The current scaffold focuses on a physical home base, crew, storage, facilities, and separate raid targets.
 
 ## Run
 
 1. Open this folder in Godot 4.3 or newer.
 2. Press Play.
 3. Move with `WASD` or arrow keys.
-4. Approach contacts and use:
+4. Open the phone with `Tab` to inspect Base, Crew, Raids, Map, Bank, and Market apps.
+5. In raids or combat spaces, use:
    - `E` to use the contact's default action
    - `B` to buy from a supplier
    - `X` to sell to a buyer
@@ -21,6 +22,7 @@ You start as a small-time neighborhood dealer and grow through higher levels of 
 
 - `project.godot` configures the project and the `GameState` autoload.
 - `maps/` contains JSON map definitions that can be saved and loaded by `MapLoader`.
+- `assets/` contains the pixel-art folder structure and visual direction notes for character, prop, tile, effect, and UI art.
 - `data/economy/` contains JSON definitions for fictional goods, recipes, district markets, consumer segments, and trade routes.
 - `data/progression/` contains JSON unlock and event rules driven by gameplay facts.
 - `scenes/` contains lightweight scene entry points.
@@ -29,13 +31,15 @@ You start as a small-time neighborhood dealer and grow through higher levels of 
 
 ## Maps
 
-The default map is `maps/neighborhood_basic.json`. It defines bounds, player start, buildings, walls, zones, props, ambient NPCs, contacts, and placeholder triggers. Add new maps by copying that file, changing the `id`/`name`, and pointing `DEFAULT_MAP_PATH` in `scripts/main.gd` at the new file.
+The default map is `maps/starter_house.json`. It defines bounds, player start, an owned base, buildings, walls, zones, props, facilities, crew NPCs, raid targets, and placeholder triggers. `maps/neighborhood_basic.json` remains as legacy/reference content.
 
 The phone's Map app reads from the same loaded map data as the playable world, so buildings, walls, NPCs, contacts, and the player marker stay tied to the active map file.
 
 Enterable buildings should use `buildings` as floor/outline data with `collides: false`, then use `walls` for exterior walls, doors, and room dividers. `tools/map_authoring_helper.gd` has small static helpers for generating exterior wall records with door gaps, room dividers, and trees.
 
 NPC map entries can include `health`, `faction`, optional `weapon` data, and optional `ai` data. Weapons support `weapon_type`, damage/projectile timing, `accuracy`, movement/recoil spread, magazines/reload, bursts, multi-projectile shots, and effective/preferred ranges. AI data can opt a unit into combat behavior with `enabled`, `hostile_factions`, `role`, `detection_radius`, weapon range overrides, reaction/memory timing, cover/suppression settings, squad settings, and follow settings that can be assigned at runtime.
+
+Base maps can include a `base` dictionary, room `slot_ids`, `facilities`, staff NPCs, and `raid_targets`. The Base, Crew, and Raids phone apps read that data through `GameState`. The starter house stores 20 KG, pays unemployment benefits weekly, and starts with Benji as a $10/week runner who can take simple transport assignments.
 
 ## Economy
 
