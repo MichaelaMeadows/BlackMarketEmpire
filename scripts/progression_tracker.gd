@@ -40,6 +40,7 @@ func record_event(event_type: String, payload: Dictionary = {}) -> Array:
 	match event_type:
 		"sale":
 			_add_metric("sold_value", float(payload.get("value", 0.0)))
+			_add_item_metric("sold_value", str(payload.get("item_id", "")), float(payload.get("value", 0.0)))
 			_add_item_metric("sold_quantity", str(payload.get("item_id", "")), float(payload.get("quantity", 0.0)))
 		"crafted":
 			_add_metric("crafted_quantity", float(payload.get("quantity", 0.0)))
@@ -155,6 +156,16 @@ func _apply_action(rule: Dictionary, action: Dictionary) -> Dictionary:
 				"id": action_id,
 				"rule_id": rule.get("id", ""),
 				"message": action.get("message", ""),
+			}
+		"unlock_market_good":
+			if action_id == "":
+				return {}
+			unlocked[action_id] = true
+			return {
+				"type": "market_unlock",
+				"id": action_id,
+				"rule_id": rule.get("id", ""),
+				"message": action.get("message", "New product available: %s" % action_id.capitalize().replace("_", " ")),
 			}
 		_:
 			return {}

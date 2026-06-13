@@ -1,6 +1,7 @@
 extends Node2D
 class_name MapLoader
 
+const MAP_NAVIGATION_SCRIPT := preload("res://scripts/map_navigation.gd")
 const DEFAULT_BACKGROUND := Color(0.06, 0.07, 0.075)
 const DEFAULT_GRID_COLOR := Color(0.10, 0.11, 0.12)
 const DEFAULT_BUILDING_COLOR := Color(0.16, 0.18, 0.19)
@@ -24,6 +25,8 @@ var map_data: Dictionary = {}
 var map_path: String = ""
 var player_position := Vector2.ZERO
 var active_building_id := ""
+var navigation
+var texture_cache: Dictionary = {}
 
 func load_map(path: String) -> bool:
 	map_path = path
@@ -31,6 +34,7 @@ func load_map(path: String) -> bool:
 	if file == null:
 		push_error("Could not open map file: %s" % path)
 		map_data = _empty_map()
+		_rebuild_navigation()
 		queue_redraw()
 		return false
 
@@ -38,10 +42,13 @@ func load_map(path: String) -> bool:
 	if typeof(parsed) != TYPE_DICTIONARY:
 		push_error("Map file is not a JSON object: %s" % path)
 		map_data = _empty_map()
+		_rebuild_navigation()
 		queue_redraw()
 		return false
 
 	map_data = parsed
+	texture_cache.clear()
+	_rebuild_navigation()
 	_rebuild_collision()
 	queue_redraw()
 	return true
@@ -90,6 +97,10 @@ func get_raid_targets() -> Array:
 
 func get_map_data() -> Dictionary:
 	return map_data
+
+
+func get_navigation():
+	return navigation
 
 
 func get_title() -> String:
@@ -159,7 +170,9 @@ func _draw_buildings() -> void:
 		_draw_floor_tiles(rect, fill_color.lightened(0.07), fill_color.darkened(0.08))
 		for room in item.get("rooms", []):
 			var room_rect: Rect2 = _read_rect(room.get("rect", []))
-			draw_rect(room_rect, Color(1.0, 1.0, 1.0, 0.025))
+			var room_color: Color = _read_color(room.get("color", []), _floor_material_color(str(room.get("floor_material", floor_material)), fill_color))
+			draw_rect(room_rect, Color(room_color.r, room_color.g, room_color.b, 0.42))
+			_draw_room_floor_details(room_rect, str(room.get("floor_material", floor_material)), room_color)
 			draw_rect(room_rect, trim_color.darkened(0.35), false, 2.0)
 		draw_rect(rect, trim_color, false, float(item.get("outline_width", 3.0)))
 		_draw_building_details(rect, str(item.get("kind", "building")), trim_color)
@@ -181,6 +194,8 @@ func _draw_props() -> void:
 		var prop_type: String = str(item.get("type", "tree"))
 		var position: Vector2 = _read_vector2(item.get("position", [0.0, 0.0]))
 		var prop_scale: float = float(item.get("scale", 1.0))
+		if _draw_sprite_item(item, position, prop_scale):
+			continue
 		match prop_type:
 			"tree":
 				var radius: float = float(item.get("radius", 22.0))
@@ -198,6 +213,28 @@ func _draw_props() -> void:
 				_draw_sign(position, prop_scale, _read_color(item.get("color", []), Color(0.70, 0.26, 0.20)))
 			"furniture":
 				_draw_furniture(position, prop_scale, _read_color(item.get("color", []), Color(0.25, 0.19, 0.14)))
+			"sofa":
+				_draw_sofa(position, prop_scale, _read_color(item.get("color", []), Color(0.20, 0.24, 0.22)))
+			"bed":
+				_draw_bed(position, prop_scale, _read_color(item.get("color", []), Color(0.18, 0.20, 0.23)))
+			"rug":
+				_draw_rug(position, prop_scale, _read_color(item.get("color", []), Color(0.36, 0.18, 0.15)))
+			"table":
+				_draw_table(position, prop_scale, _read_color(item.get("color", []), Color(0.25, 0.17, 0.11)))
+			"chair":
+				_draw_chair(position, prop_scale, _read_color(item.get("color", []), Color(0.22, 0.16, 0.11)))
+			"appliance":
+				_draw_appliance(position, prop_scale, _read_color(item.get("color", []), Color(0.24, 0.27, 0.27)))
+			"sink":
+				_draw_sink(position, prop_scale)
+			"toilet":
+				_draw_toilet(position, prop_scale)
+			"shelf":
+				_draw_shelf(position, prop_scale, _read_color(item.get("color", []), Color(0.18, 0.13, 0.09)))
+			"cabinet":
+				_draw_cabinet(position, prop_scale, _read_color(item.get("color", []), Color(0.24, 0.17, 0.11)))
+			"boxes":
+				_draw_boxes(position, prop_scale, _read_color(item.get("color", []), Color(0.32, 0.22, 0.13)))
 			_:
 				_draw_crate(position, prop_scale, _read_color(item.get("color", []), DEFAULT_WALL_COLOR))
 
@@ -398,6 +435,23 @@ func _draw_floor_tiles(rect: Rect2, light: Color, dark: Color) -> void:
 	_draw_pixel_noise(rect, light, 72.0, 5.0)
 
 
+func _draw_room_floor_details(rect: Rect2, material: String, color: Color) -> void:
+	if material.contains("tile") or material.contains("bath"):
+		for x in range(int(rect.position.x), int(rect.end.x), 32):
+			draw_line(Vector2(x, rect.position.y), Vector2(x, rect.end.y), color.darkened(0.28), 1.0)
+		for y in range(int(rect.position.y), int(rect.end.y), 32):
+			draw_line(Vector2(rect.position.x, y), Vector2(rect.end.x, y), color.darkened(0.28), 1.0)
+	elif material.contains("carpet") or material.contains("rug"):
+		draw_rect(rect.grow(-12.0), Color(color.r, color.g, color.b, 0.25))
+		_draw_pixel_noise(rect.grow(-10.0), color.lightened(0.18), 58.0, 4.0)
+	elif material.contains("wood"):
+		for y in range(int(rect.position.y) + 18, int(rect.end.y), 38):
+			draw_line(Vector2(rect.position.x + 12.0, y), Vector2(rect.end.x - 12.0, y), color.darkened(0.24), 1.0)
+		_draw_pixel_noise(rect, color.lightened(0.16), 84.0, 4.0)
+	else:
+		_draw_pixel_noise(rect, color.lightened(0.10), 76.0, 4.0)
+
+
 func _draw_building_details(rect: Rect2, kind: String, trim_color: Color) -> void:
 	var door_width := 64.0 if kind != "police_station" else 86.0
 	var door_rect := Rect2(Vector2(rect.get_center().x - door_width * 0.5, rect.end.y - 12.0), Vector2(door_width, 18.0))
@@ -482,6 +536,159 @@ func _draw_furniture(position: Vector2, prop_scale: float, color: Color) -> void
 	draw_rect(rect, color.lightened(0.14), false, 2.0)
 
 
+func _draw_sofa(position: Vector2, prop_scale: float, color: Color) -> void:
+	var body := Rect2(position + Vector2(-42.0, -18.0) * prop_scale, Vector2(84.0, 36.0) * prop_scale)
+	draw_rect(Rect2(body.position + Vector2(4.0, 5.0), body.size), Color(0.0, 0.0, 0.0, 0.24))
+	draw_rect(body, color)
+	draw_rect(Rect2(body.position + Vector2(4.0, 4.0) * prop_scale, Vector2(76.0, 12.0) * prop_scale), color.lightened(0.12))
+	draw_rect(Rect2(body.position, Vector2(12.0, body.size.y)), color.darkened(0.16))
+	draw_rect(Rect2(Vector2(body.end.x - 12.0, body.position.y), Vector2(12.0, body.size.y)), color.darkened(0.16))
+	draw_rect(body, color.darkened(0.36), false, 2.0)
+
+
+func _draw_bed(position: Vector2, prop_scale: float, color: Color) -> void:
+	var bed := Rect2(position + Vector2(-34.0, -50.0) * prop_scale, Vector2(68.0, 100.0) * prop_scale)
+	draw_rect(Rect2(bed.position + Vector2(4.0, 5.0), bed.size), Color(0.0, 0.0, 0.0, 0.22))
+	draw_rect(bed, color.darkened(0.08))
+	draw_rect(Rect2(bed.position + Vector2(8.0, 8.0) * prop_scale, Vector2(52.0, 24.0) * prop_scale), Color(0.66, 0.62, 0.52))
+	draw_rect(Rect2(bed.position + Vector2(8.0, 38.0) * prop_scale, Vector2(52.0, 54.0) * prop_scale), color.lightened(0.15))
+	draw_rect(bed, color.darkened(0.38), false, 2.0)
+
+
+func _draw_rug(position: Vector2, prop_scale: float, color: Color) -> void:
+	var rug := Rect2(position + Vector2(-54.0, -34.0) * prop_scale, Vector2(108.0, 68.0) * prop_scale)
+	draw_rect(rug, Color(color.r, color.g, color.b, 0.62))
+	draw_rect(rug.grow(-8.0 * prop_scale), Color(color.lightened(0.18).r, color.lightened(0.18).g, color.lightened(0.18).b, 0.34))
+	draw_rect(rug, color.darkened(0.24), false, 2.0)
+
+
+func _draw_table(position: Vector2, prop_scale: float, color: Color) -> void:
+	var table := Rect2(position + Vector2(-34.0, -22.0) * prop_scale, Vector2(68.0, 44.0) * prop_scale)
+	draw_rect(Rect2(table.position + Vector2(4.0, 5.0), table.size), Color(0.0, 0.0, 0.0, 0.22))
+	draw_rect(table, color)
+	draw_rect(table.grow(-6.0 * prop_scale), color.lightened(0.14), false, 2.0)
+	draw_rect(table, color.darkened(0.34), false, 2.0)
+
+
+func _draw_chair(position: Vector2, prop_scale: float, color: Color) -> void:
+	var seat := Rect2(position + Vector2(-12.0, -12.0) * prop_scale, Vector2(24.0, 24.0) * prop_scale)
+	draw_rect(Rect2(seat.position + Vector2(3.0, 4.0), seat.size), Color(0.0, 0.0, 0.0, 0.20))
+	draw_rect(seat, color)
+	draw_rect(Rect2(seat.position + Vector2(0.0, -8.0) * prop_scale, Vector2(24.0, 8.0) * prop_scale), color.darkened(0.12))
+	draw_rect(seat, color.darkened(0.32), false, 2.0)
+
+
+func _draw_appliance(position: Vector2, prop_scale: float, color: Color) -> void:
+	var appliance := Rect2(position + Vector2(-24.0, -24.0) * prop_scale, Vector2(48.0, 48.0) * prop_scale)
+	draw_rect(Rect2(appliance.position + Vector2(4.0, 5.0), appliance.size), Color(0.0, 0.0, 0.0, 0.20))
+	draw_rect(appliance, color)
+	draw_rect(appliance.grow(-7.0 * prop_scale), color.darkened(0.20), false, 2.0)
+	draw_circle(appliance.position + Vector2(14.0, 14.0) * prop_scale, 3.0 * prop_scale, color.lightened(0.35))
+	draw_rect(appliance, color.darkened(0.40), false, 2.0)
+
+
+func _draw_sink(position: Vector2, prop_scale: float) -> void:
+	var sink := Rect2(position + Vector2(-20.0, -14.0) * prop_scale, Vector2(40.0, 28.0) * prop_scale)
+	draw_rect(Rect2(sink.position + Vector2(3.0, 4.0), sink.size), Color(0.0, 0.0, 0.0, 0.18))
+	draw_rect(sink, Color(0.52, 0.56, 0.54))
+	draw_rect(sink.grow(-7.0 * prop_scale), Color(0.20, 0.24, 0.24), false, 2.0)
+	draw_circle(sink.get_center(), 3.0 * prop_scale, Color(0.05, 0.06, 0.06))
+
+
+func _draw_toilet(position: Vector2, prop_scale: float) -> void:
+	draw_rect(Rect2(position + Vector2(-13.0, -24.0) * prop_scale, Vector2(26.0, 18.0) * prop_scale), Color(0.54, 0.56, 0.52))
+	draw_circle(position + Vector2(0.0, 8.0) * prop_scale, 16.0 * prop_scale, Color(0.58, 0.60, 0.56))
+	draw_circle(position + Vector2(0.0, 8.0) * prop_scale, 8.0 * prop_scale, Color(0.16, 0.18, 0.18))
+	draw_circle(position + Vector2(0.0, 8.0) * prop_scale, 16.0 * prop_scale, Color(0.24, 0.26, 0.24, 0.0))
+
+
+func _draw_shelf(position: Vector2, prop_scale: float, color: Color) -> void:
+	var shelf := Rect2(position + Vector2(-18.0, -42.0) * prop_scale, Vector2(36.0, 84.0) * prop_scale)
+	draw_rect(Rect2(shelf.position + Vector2(4.0, 5.0), shelf.size), Color(0.0, 0.0, 0.0, 0.20))
+	draw_rect(shelf, color)
+	for y in range(1, 4):
+		var shelf_y := shelf.position.y + float(y) * shelf.size.y / 4.0
+		draw_line(Vector2(shelf.position.x + 4.0, shelf_y), Vector2(shelf.end.x - 4.0, shelf_y), color.lightened(0.18), 2.0)
+	draw_rect(shelf, color.darkened(0.36), false, 2.0)
+
+
+func _draw_cabinet(position: Vector2, prop_scale: float, color: Color) -> void:
+	var cabinet := Rect2(position + Vector2(-28.0, -14.0) * prop_scale, Vector2(56.0, 28.0) * prop_scale)
+	draw_rect(Rect2(cabinet.position + Vector2(3.0, 4.0), cabinet.size), Color(0.0, 0.0, 0.0, 0.20))
+	draw_rect(cabinet, color)
+	draw_line(Vector2(cabinet.get_center().x, cabinet.position.y + 3.0), Vector2(cabinet.get_center().x, cabinet.end.y - 3.0), color.darkened(0.24), 2.0)
+	draw_rect(cabinet, color.darkened(0.32), false, 2.0)
+
+
+func _draw_boxes(position: Vector2, prop_scale: float, color: Color) -> void:
+	_draw_crate(position + Vector2(-13.0, 8.0) * prop_scale, prop_scale * 0.9, color)
+	_draw_crate(position + Vector2(16.0, 4.0) * prop_scale, prop_scale * 0.8, color.lightened(0.08))
+	_draw_crate(position + Vector2(2.0, -18.0) * prop_scale, prop_scale * 0.75, color.darkened(0.05))
+
+
+func _draw_sprite_item(item: Dictionary, position: Vector2, prop_scale: float) -> bool:
+	var sprite_data := _resolve_sprite_data(item)
+	if sprite_data.is_empty():
+		return false
+	var texture_path := str(sprite_data.get("path", ""))
+	if texture_path == "":
+		return false
+	var texture: Texture2D = _get_texture(texture_path)
+	if texture == null:
+		return false
+
+	var size := _read_vector2(sprite_data.get("size", item.get("sprite_size", [])))
+	if size == Vector2.ZERO:
+		size = texture.get_size()
+	size *= prop_scale * float(sprite_data.get("scale", 1.0))
+	var offset := _read_vector2(sprite_data.get("offset", item.get("sprite_offset", [0.0, 0.0]))) * prop_scale
+	var rect := Rect2(position - size * 0.5 + offset, size)
+	var rotation_degrees := float(sprite_data.get("rotation_degrees", item.get("rotation_degrees", 0.0)))
+	var tint: Color = _read_color(sprite_data.get("tint", item.get("tint", [])), Color.WHITE)
+	if not is_equal_approx(rotation_degrees, 0.0):
+		draw_set_transform(position + offset, deg_to_rad(rotation_degrees), Vector2.ONE)
+		draw_texture_rect(texture, Rect2(-size * 0.5, size), false, tint)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	else:
+		draw_texture_rect(texture, rect, false, tint)
+	return true
+
+
+func _resolve_sprite_data(item: Dictionary) -> Dictionary:
+	var sprite_value: Variant = item.get("sprite", {})
+	if sprite_value is Dictionary and not sprite_value.is_empty():
+		return sprite_value
+	if sprite_value is String:
+		return {"path": str(sprite_value)}
+	if item.has("sprite_path"):
+		return {"path": str(item.get("sprite_path", "")), "size": item.get("sprite_size", [])}
+
+	var assets_value: Variant = map_data.get("sprite_assets", {})
+	if not (assets_value is Dictionary):
+		return {}
+	var visual_id := str(item.get("visual_id", item.get("id", "")))
+	var asset_value: Variant = assets_value.get(visual_id, {})
+	if asset_value is Dictionary:
+		return asset_value
+	if asset_value is String:
+		return {"path": str(asset_value)}
+	return {}
+
+
+func _get_texture(path: String) -> Texture2D:
+	if texture_cache.has(path):
+		return texture_cache[path]
+	if not ResourceLoader.exists(path):
+		texture_cache[path] = null
+		return null
+	var texture: Resource = load(path)
+	if texture is Texture2D:
+		texture_cache[path] = texture
+		return texture
+	texture_cache[path] = null
+	return null
+
+
 func _draw_light_pool(position: Vector2, radius: float, color: Color) -> void:
 	draw_circle(position, radius, Color(color.r, color.g, color.b, color.a * 0.28))
 	draw_circle(position, radius * 0.55, Color(color.r, color.g, color.b, color.a))
@@ -505,6 +712,11 @@ func _rebuild_collision() -> void:
 			float(item.get("collision_radius", item.get("radius", 22.0))),
 			str(item.get("id", "prop"))
 		)
+
+
+func _rebuild_navigation() -> void:
+	navigation = MAP_NAVIGATION_SCRIPT.new()
+	navigation.setup(map_data)
 
 
 func _add_rect_collision(rect: Rect2, id: String) -> void:
@@ -572,6 +784,8 @@ func _empty_map() -> Dictionary:
 		"npcs": [],
 		"contacts": [],
 		"facilities": [],
+		"cover": [],
+		"activity_points": [],
 		"raid_targets": [],
 		"triggers": [],
 	}

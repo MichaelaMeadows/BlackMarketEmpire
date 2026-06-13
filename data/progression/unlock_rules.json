@@ -1,6 +1,18 @@
 {
   "rules": [
     {
+      "id": "starting_good_sales_open_bootlegs",
+      "type": "item_metric_threshold",
+      "metric": "sold_value",
+      "item_id": "fast_food",
+      "threshold": 200,
+      "actions": [
+        {"type": "unlock", "id": "bootleg_media_intro"},
+        {"type": "unlock_market_good", "id": "bootleg_media", "message": "A corner media seller trusts your runners now. Bootleg Media is available in the Market."},
+        {"type": "event", "id": "bootleg_media_popup", "message": "New market contact: Bootleg Media is available."}
+      ]
+    },
+    {
       "id": "first_real_money",
       "type": "metric_threshold",
       "metric": "sold_value",

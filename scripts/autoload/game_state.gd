@@ -2,9 +2,12 @@ extends Node
 
 signal state_changed
 signal progression_event_triggered(event: Dictionary)
+signal crew_hired(crew_member: Dictionary)
 
 const MARKET_SIMULATION_SCRIPT = preload("res://scripts/market_simulation.gd")
 const PROGRESSION_TRACKER_SCRIPT = preload("res://scripts/progression_tracker.gd")
+const NPC_ROLE_CATALOG_SCRIPT = preload("res://scripts/npc_role_catalog.gd")
+const NAME_GENERATOR_SCRIPT = preload("res://scripts/name_generator.gd")
 const ECONOMY_DATA_PATH = "res://data/economy"
 const PROGRESSION_DATA_PATH = "res://data/progression/unlock_rules.json"
 const GOOD_KEY = "fast_food"
@@ -13,15 +16,32 @@ const DAYS_PER_WEEK = 7
 const UNEMPLOYMENT_BENEFITS_WEEKLY = 25
 const RUNNER_CARRY_CAPACITY_KG = 5
 const TRADE_SOURCE_INFINITE = -1
+const HIRE_CANDIDATE_REFRESH_DAYS = 3
+const STARTING_HIRE_CANDIDATE_LIMIT = 2
+const MAX_HIRE_CANDIDATE_LIMIT = 6
+const LEGALITY_LEGAL = "legal"
+const LEGALITY_ILLICIT = "illicit"
+const LEGALITY_CONTROLLED = "controlled"
+const LEGALITY_ILLEGAL = "illegal"
+const LEGALITY_TABOO = "taboo"
+const HIRE_ARCHETYPE_SEQUENCE := ["thug", "thug", "dealer", "runner", "mercenary", "workshop_hand"]
+const HIRE_ARCHETYPE_PRICES := {
+	"dealer": 35,
+	"runner": 30,
+	"thug": 45,
+	"mercenary": 120,
+	"workshop_hand": 45,
+}
 
 var cash: int = 100
 var heat: int = 0
 var current_scope: String = "neighborhood"
-var product_name: String = "Fast-Food"
+var product_name: String = "Fast Food"
 var active_market_id: String = STARTING_MARKET_ID
 var day_count: int = 0
 var market
 var progression
+var hire_name_generator = NAME_GENERATOR_SCRIPT.new(4177)
 var inventory: Dictionary = {
 	"fast_food": 0,
 }
@@ -37,7 +57,7 @@ var storage_capacity: int = 0
 var trade_sources: Dictionary = {
 	"fast_food": {
 		"id": "burger_stop",
-		"name": "Fast-Food",
+		"name": "Fast Food",
 		"source_name": "Burger Stop",
 		"buy_price": 3,
 		"sell_price": 6,
@@ -45,22 +65,40 @@ var trade_sources: Dictionary = {
 		"distance_label": "2 blocks",
 		"source_inventory": TRADE_SOURCE_INFINITE,
 		"unit_weight_kg": 2,
-		"legal": true,
+		"legality": LEGALITY_LEGAL,
 		"unlocked": true,
+	},
+	"bootleg_media": {
+		"id": "corner_media_seller",
+		"name": "Bootleg Media",
+		"source_name": "Corner Media Seller",
+		"buy_price": 6,
+		"sell_price": 11,
+		"distance": 3,
+		"distance_label": "3 blocks",
+		"source_inventory": 36,
+		"unit_weight_kg": 1,
+		"legality": LEGALITY_ILLICIT,
+		"unlocked": false,
 	},
 }
 var weekly_income_sources: Array = [
 	{"id": "unemployment_benefits", "name": "Unemployment Benefits", "amount": UNEMPLOYMENT_BENEFITS_WEEKLY},
 ]
 var transport_tasks: Array = [
-	{"id": "corner_pickup", "name": "Corner Pickup", "required_job": "Runner", "duration_days": 1, "reward": 8, "capacity_kg": 5},
-	{"id": "supply_drop", "name": "Supply Drop", "required_job": "Runner", "duration_days": 1, "reward": 10, "capacity_kg": 4},
+	{"id": "corner_pickup", "name": "Corner Pickup", "required_role": "transporter", "duration_days": 1, "reward": 8, "capacity_kg": 5},
+	{"id": "supply_drop", "name": "Supply Drop", "required_role": "transporter", "duration_days": 1, "reward": 10, "capacity_kg": 4},
 ]
 var active_trade_orders: Dictionary = {}
 var active_trade_trips: Dictionary = {}
 var reserved_sell_inventory: Dictionary = {}
 var next_trade_order_id: int = 1
 var next_trade_trip_id: int = 1
+var hire_candidates: Array = []
+var hire_candidates_initialized := false
+var hire_candidate_progress_days: int = 0
+var next_hire_candidate_id: int = 1
+var next_hired_crew_id: int = 1
 var raid_targets: Array = []
 var active_raid_target: Dictionary = {}
 var raid_stats: Dictionary = {
@@ -74,6 +112,7 @@ func _ready() -> void:
 	_ensure_progression()
 	product_name = str(market.get_good(GOOD_KEY).get("name", product_name))
 	storage_inventory[GOOD_KEY] = get_stock()
+	_ensure_hire_candidates()
 
 
 func buy_from_supplier(quantity: int = 1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
@@ -126,8 +165,8 @@ func sell_to_buyer(quantity: int = 1, unit_price: int = -1, good_id: String = GO
 
 func place_buy_order(quantity: int = -1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
 	_ensure_market()
-	if not _has_runner():
-		return _result(false, "No runner is available.")
+	if not _has_transporter():
+		return _result(false, "No transporter is available.")
 	if not _is_trade_good_unlocked(good_id):
 		return _result(false, "That product is not available yet.")
 	if unit_price < 0:
@@ -169,8 +208,8 @@ func place_buy_order(quantity: int = -1, unit_price: int = -1, good_id: String =
 
 func place_sell_order(quantity: int = -1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
 	_ensure_market()
-	if not _has_runner():
-		return _result(false, "No runner is available.")
+	if not _has_transporter():
+		return _result(false, "No transporter is available.")
 	if not _is_trade_good_unlocked(good_id):
 		return _result(false, "That product is not available yet.")
 	var desired_quantity: int = get_runner_trip_unit_capacity(good_id) if quantity <= 0 else quantity
@@ -305,15 +344,23 @@ func get_trade_order_rows() -> Array:
 			continue
 		var good_id := str(order.get("good_id", GOOD_KEY))
 		var unit_weight: int = get_unit_weight_kg(good_id)
+		var unit_price := int(order.get("unit_price", 0))
 		rows.append({
 			"id": str(order.get("id", "")),
+			"order_id": str(order.get("id", "")),
+			"trip_id": "",
 			"row_type": "order",
 			"direction": _format_trade_direction(str(order.get("type", ""))),
 			"type": str(order.get("type", "")),
 			"good_id": good_id,
 			"good_name": _get_trade_good_name(good_id),
+			"legality_label": _format_legality_label(_get_trade_good_legality(good_id)),
 			"status": "Queued",
 			"quantity": pending_quantity,
+			"total_quantity": int(order.get("total_quantity", 0)),
+			"pending_quantity": pending_quantity,
+			"in_flight_quantity": int(order.get("in_flight_quantity", 0)),
+			"completed_quantity": int(order.get("completed_quantity", 0)),
 			"unit_weight_kg": unit_weight,
 			"holding_weight_kg": 0,
 			"load_weight_kg": pending_quantity * unit_weight,
@@ -321,6 +368,9 @@ func get_trade_order_rows() -> Array:
 			"eta_seconds": -1.0,
 			"eta_label": "Queued",
 			"risk_label": "Low",
+			"market_id": str(order.get("market_id", active_market_id)),
+			"unit_price": unit_price,
+			"value": int(order.get("value", 0)),
 		})
 
 	for trip_id in active_trade_trips:
@@ -342,13 +392,18 @@ func get_unit_weight_kg(good_id: String = GOOD_KEY) -> int:
 
 
 func get_runner_trip_unit_capacity(good_id: String = GOOD_KEY) -> int:
-	return int(floor(float(RUNNER_CARRY_CAPACITY_KG) / float(get_unit_weight_kg(good_id))))
+	return get_transporter_trip_unit_capacity(good_id)
+
+
+func get_transporter_trip_unit_capacity(good_id: String = GOOD_KEY) -> int:
+	var carry_capacity := _get_best_transporter_carry_capacity_kg()
+	return int(floor(float(carry_capacity) / float(get_unit_weight_kg(good_id))))
 
 
 func dispatch_queued_trade_trips() -> Array:
 	var dispatched: Array = []
 	while true:
-		var crew_index: int = _find_idle_runner_index()
+		var crew_index: int = _find_idle_transporter_index()
 		if crew_index < 0:
 			break
 		var order_id: String = _find_dispatchable_trade_order_id()
@@ -381,7 +436,11 @@ func pay_fixer(cost: int = 25, heat_reduction: int = 12) -> Dictionary:
 
 
 func initialize_base_from_map(map_data: Dictionary) -> void:
-	current_base = map_data.get("base", {}).duplicate(true)
+	var new_base: Dictionary = map_data.get("base", {}).duplicate(true)
+	var previous_base_id := str(current_base.get("id", ""))
+	var new_base_id := str(new_base.get("id", ""))
+	var should_preserve_roster := previous_base_id != "" and previous_base_id == new_base_id and not crew_roster.is_empty()
+	current_base = new_base
 	base_rooms = _extract_base_rooms(map_data)
 	base_facilities = _read_dictionary_array(map_data.get("facilities", []))
 	raid_targets = _read_dictionary_array(map_data.get("raid_targets", []))
@@ -395,7 +454,8 @@ func initialize_base_from_map(map_data: Dictionary) -> void:
 		if str(facility.get("type", "")) == "storage":
 			storage_capacity += int(facility.get("capacity", 0))
 
-	crew_roster = _extract_crew_from_map(map_data)
+	if not should_preserve_roster:
+		crew_roster = _extract_crew_from_map(map_data)
 	if storage_inventory.is_empty():
 			storage_inventory[GOOD_KEY] = get_stock(GOOD_KEY)
 	else:
@@ -405,6 +465,8 @@ func initialize_base_from_map(map_data: Dictionary) -> void:
 
 func get_base_summary() -> Dictionary:
 	var fallback_name: String = "No Base"
+	var role_limits: Dictionary = get_base_role_limits()
+	var role_counts: Dictionary = get_base_role_counts()
 	return {
 		"id": str(current_base.get("id", "")),
 		"name": str(current_base.get("name", fallback_name)),
@@ -414,6 +476,8 @@ func get_base_summary() -> Dictionary:
 		"room_count": base_rooms.size(),
 		"facility_count": base_facilities.size(),
 		"crew_count": crew_roster.size(),
+		"role_limits": role_limits,
+		"role_counts": role_counts,
 		"storage_capacity": storage_capacity,
 		"storage_used": get_storage_used(),
 		"weekly_income": get_weekly_income_total(),
@@ -445,16 +509,125 @@ func get_crew_roster() -> Array:
 	return living_roster
 
 
-func get_ready_crew_count() -> int:
+func get_available_hires() -> Array:
+	_ensure_hire_candidates()
+	var hires: Array = []
+	for candidate in hire_candidates:
+		if not (candidate is Dictionary):
+			continue
+		var row: Dictionary = candidate.duplicate(true)
+		var role_id := str(row.get("role", ""))
+		var price := int(row.get("price", 0))
+		var block_reason := ""
+		if cash < price:
+			block_reason = "Need $%d." % price
+		elif not can_base_accept_role(role_id):
+			block_reason = "No %s slots available." % str(row.get("role_name", role_id.capitalize()))
+		row["can_hire"] = block_reason == ""
+		row["block_reason"] = block_reason
+		hires.append(row)
+	return hires
+
+
+func hire_employee(candidate_id: String) -> Dictionary:
+	_ensure_hire_candidates()
+	var candidate_index := _find_hire_candidate_index(candidate_id)
+	if candidate_index < 0:
+		return _result(false, "That candidate is no longer available.")
+
+	var candidate: Dictionary = hire_candidates[candidate_index]
+	var role_id := str(candidate.get("role", ""))
+	var price := int(candidate.get("price", 0))
+	if cash < price:
+		return _result(false, "Need $%d to hire %s." % [price, str(candidate.get("name", "them"))])
+	if not can_base_accept_role(role_id):
+		return _result(false, "No %s slots available." % str(candidate.get("role_name", role_id.capitalize())))
+
+	cash -= price
+	var crew_member := candidate.duplicate(true)
+	crew_member["id"] = "hireling_%d" % next_hired_crew_id
+	next_hired_crew_id += 1
+	crew_member.erase("price")
+	crew_member.erase("can_hire")
+	crew_member.erase("block_reason")
+	crew_member.erase("available_day")
+	crew_member["status"] = "Ready"
+	crew_member["assigned_task"] = ""
+	crew_member["health"] = int(crew_member.get("health", 60))
+	crew_member["faction"] = "player_crew"
+	crew_member["visual_id"] = _get_hire_visual_id(str(crew_member.get("archetype", "")))
+	if not crew_member.has("color"):
+		crew_member["color"] = _get_hire_color(str(crew_member.get("role", "")), str(crew_member.get("archetype", "")))
+	_apply_default_hire_loadout(crew_member)
+	crew_roster.append(crew_member)
+	hire_candidates.remove_at(candidate_index)
+	var result := _result(true, "Hired %s for $%d." % [str(crew_member.get("name", "Crew")), price])
+	result["crew_member"] = crew_member.duplicate(true)
+	crew_hired.emit(crew_member.duplicate(true))
+	state_changed.emit()
+	return result
+
+
+func get_crew_count(role_id: String = "") -> int:
 	var count: int = 0
 	for crew_member in crew_roster:
 		if not (crew_member is Dictionary):
 			continue
 		if not _is_crew_member_alive(crew_member):
 			continue
+		if role_id != "" and not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, role_id):
+			continue
+		count += 1
+	return count
+
+
+func get_ready_crew_count(role_id: String = "") -> int:
+	var count: int = 0
+	for crew_member in crew_roster:
+		if not (crew_member is Dictionary):
+			continue
+		if not _is_crew_member_alive(crew_member):
+			continue
+		if role_id != "" and not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, role_id):
+			continue
 		if str(crew_member.get("status", "Ready")) == "Ready":
 			count += 1
 	return count
+
+
+func get_base_role_limits() -> Dictionary:
+	var normalized_limits := {
+		"transporter": 0,
+		"muscle": 0,
+		"production": 0,
+	}
+	var raw_limits: Variant = current_base.get("role_limits", current_base.get("staff_limits", {}))
+	if raw_limits is Dictionary:
+		for role_id in raw_limits:
+			var normalized_role := NPC_ROLE_CATALOG_SCRIPT.normalize_role_id(str(role_id))
+			if normalized_role == "":
+				continue
+			normalized_limits[normalized_role] = max(0, int(raw_limits[role_id]))
+	return normalized_limits
+
+
+func get_base_role_limit(role_id: String) -> int:
+	var limits: Dictionary = get_base_role_limits()
+	var normalized_role := NPC_ROLE_CATALOG_SCRIPT.normalize_role_id(role_id)
+	return int(limits.get(normalized_role, 0))
+
+
+func get_base_role_counts() -> Dictionary:
+	return {
+		"transporter": get_crew_count("transporter"),
+		"muscle": get_crew_count("muscle"),
+		"production": get_crew_count("production"),
+	}
+
+
+func can_base_accept_role(role_id: String) -> bool:
+	var normalized_role := NPC_ROLE_CATALOG_SCRIPT.normalize_role_id(role_id)
+	return get_crew_count(normalized_role) < get_base_role_limit(normalized_role)
 
 
 func get_weekly_income_sources() -> Array:
@@ -659,13 +832,16 @@ func get_available_trade_goods() -> Array:
 			"sell_price": get_current_sell_price(str(good_id)),
 			"unit_weight_kg": get_unit_weight_kg(str(good_id)),
 			"runner_trip_units": get_runner_trip_unit_capacity(str(good_id)),
+			"transporter_trip_units": get_transporter_trip_unit_capacity(str(good_id)),
 			"distance": int(source.get("distance", 0)),
 			"distance_label": get_trade_distance_label(str(good_id)),
 			"base_inventory": get_stock(str(good_id)),
 			"available_sell_inventory": get_available_sell_stock(str(good_id)),
 			"remote_inventory": get_remote_inventory_for_good(str(good_id)),
 			"remote_inventory_label": get_remote_inventory_label(str(good_id)),
-			"legal": bool(source.get("legal", false)),
+			"legality": _get_trade_good_legality(str(good_id)),
+			"legality_label": _format_legality_label(_get_trade_good_legality(str(good_id))),
+			"legal": _is_trade_good_legal(str(good_id)),
 		})
 	return goods
 
@@ -696,6 +872,7 @@ func advance_market(days: int = 1) -> void:
 	_ensure_progression()
 	market.advance_day(days)
 	_apply_weekly_finances(days)
+	_advance_hire_candidates(days)
 	_record_recent_production()
 	_emit_progression_events(progression.advance_day(days))
 	state_changed.emit()
@@ -734,6 +911,17 @@ func record_kill(target_type: String = "npc") -> Array:
 func is_unlocked(unlock_id: String) -> bool:
 	_ensure_progression()
 	return progression.is_unlocked(unlock_id)
+
+
+func unlock_trade_good(good_id: String) -> bool:
+	if not trade_sources.has(good_id):
+		return false
+	var source: Dictionary = trade_sources[good_id]
+	if bool(source.get("unlocked", false)):
+		return false
+	source["unlocked"] = true
+	trade_sources[good_id] = source
+	return true
 
 
 func get_progress_metric(metric_name: String, item_id: String = "") -> float:
@@ -784,6 +972,70 @@ func _ensure_progression() -> void:
 	progression.load_rules(PROGRESSION_DATA_PATH)
 
 
+func _ensure_hire_candidates() -> void:
+	if hire_candidates_initialized:
+		return
+	while hire_candidates.size() < STARTING_HIRE_CANDIDATE_LIMIT and hire_candidates.size() < _get_hire_candidate_limit():
+		_add_hire_candidate()
+	hire_candidates_initialized = true
+
+
+func _advance_hire_candidates(days: int) -> void:
+	hire_candidate_progress_days += max(0, days)
+	while hire_candidate_progress_days >= HIRE_CANDIDATE_REFRESH_DAYS and hire_candidates.size() < _get_hire_candidate_limit():
+		hire_candidate_progress_days -= HIRE_CANDIDATE_REFRESH_DAYS
+		_add_hire_candidate()
+	if hire_candidates.size() >= _get_hire_candidate_limit():
+		hire_candidate_progress_days = 0
+
+
+func _get_hire_candidate_limit() -> int:
+	return min(MAX_HIRE_CANDIDATE_LIMIT, STARTING_HIRE_CANDIDATE_LIMIT + int(day_count / DAYS_PER_WEEK))
+
+
+func _add_hire_candidate() -> void:
+	var archetype_id := str(HIRE_ARCHETYPE_SEQUENCE[(next_hire_candidate_id - 1) % HIRE_ARCHETYPE_SEQUENCE.size()])
+	var staff_profile := NPC_ROLE_CATALOG_SCRIPT.build_staff_profile({"archetype": archetype_id}, {})
+	var candidate := {
+		"id": "hire_candidate_%d" % next_hire_candidate_id,
+		"name": _generate_hire_name(),
+		"price": int(HIRE_ARCHETYPE_PRICES.get(archetype_id, 50)),
+		"role": str(staff_profile.get("role", "")),
+		"role_name": str(staff_profile.get("role_name", "Crew")),
+		"archetype": str(staff_profile.get("archetype", archetype_id)),
+		"archetype_name": str(staff_profile.get("archetype_name", archetype_id.capitalize())),
+		"job": str(staff_profile.get("job", archetype_id.capitalize())),
+		"task_types": staff_profile.get("task_types", []),
+		"carry_capacity_kg": int(staff_profile.get("carry_capacity_kg", 0)),
+		"upkeep": int(staff_profile.get("upkeep", 0)),
+		"status": "Ready",
+		"assigned_task": "",
+		"health": 60,
+		"available_day": day_count,
+	}
+	_apply_default_hire_loadout(candidate)
+	hire_candidates.append(candidate)
+	next_hire_candidate_id += 1
+
+
+func _generate_hire_name() -> String:
+	for _attempt in range(24):
+		var candidate_name := hire_name_generator.generate_npc_name({"include_surname": false})
+		if not _is_crew_or_candidate_name_used(candidate_name):
+			return candidate_name
+	return hire_name_generator.generate_npc_name({"include_surname": true})
+
+
+func _is_crew_or_candidate_name_used(candidate_name: String) -> bool:
+	for crew_member in crew_roster:
+		if crew_member is Dictionary and str(crew_member.get("name", "")) == candidate_name:
+			return true
+	for candidate in hire_candidates:
+		if candidate is Dictionary and str(candidate.get("name", "")) == candidate_name:
+			return true
+	return false
+
+
 func _extract_base_rooms(map_data: Dictionary) -> Array:
 	var rooms: Array = []
 	for building in map_data.get("buildings", []):
@@ -809,19 +1061,69 @@ func _extract_crew_from_map(map_data: Dictionary) -> Array:
 		if str(npc.get("faction", "")) != "player_crew":
 			continue
 		var staff_data: Dictionary = npc.get("staff", {})
+		var staff_profile: Dictionary = NPC_ROLE_CATALOG_SCRIPT.build_staff_profile(staff_data, npc)
 		roster.append({
 			"id": str(npc.get("id", "")),
 			"name": str(npc.get("name", "Crew")),
-			"role": str(npc.get("role", "crew")),
-			"job": str(staff_data.get("job", npc.get("role", "Crew"))),
-			"status": str(staff_data.get("status", "Ready")),
-			"assigned_task": str(staff_data.get("assigned_task", "")),
-			"task_types": staff_data.get("task_types", []),
-			"upkeep": int(staff_data.get("upkeep", 0)),
+			"role": str(staff_profile.get("role", "")),
+			"role_name": str(staff_profile.get("role_name", "Crew")),
+			"archetype": str(staff_profile.get("archetype", "")),
+			"archetype_name": str(staff_profile.get("archetype_name", "Crew")),
+			"job": str(staff_profile.get("job", "Crew")),
+			"status": str(staff_profile.get("status", "Ready")),
+			"assigned_task": str(staff_profile.get("assigned_task", "")),
+			"task_types": staff_profile.get("task_types", []),
+			"carry_capacity_kg": int(staff_profile.get("carry_capacity_kg", RUNNER_CARRY_CAPACITY_KG)),
+			"upkeep": int(staff_profile.get("upkeep", 0)),
 			"health": int(npc.get("health", 60)),
 			"color": npc.get("color", []),
+			"visual_id": str(npc.get("visual_id", "crew_jacket")),
+			"faction": str(npc.get("faction", "player_crew")),
+			"home_position": npc.get("position", []),
 		})
 	return roster
+
+
+func _get_hire_visual_id(archetype_id: String) -> String:
+	match archetype_id:
+		"thug", "mercenary":
+			return "crew_muscle"
+		"workshop_hand":
+			return "crew_worker"
+	return "crew_jacket"
+
+
+func _get_hire_color(role_id: String, archetype_id: String) -> Array:
+	match role_id:
+		"muscle":
+			return [0.58, 0.36, 0.30]
+		"production":
+			return [0.72, 0.58, 0.30]
+	match archetype_id:
+		"runner":
+			return [0.36, 0.58, 0.72]
+	return [0.28, 0.68, 0.62]
+
+
+func _apply_default_hire_loadout(crew_member: Dictionary) -> void:
+	match str(crew_member.get("archetype", "")):
+		"thug":
+			crew_member["ranged_weapon"] = false
+			crew_member["weapon"] = null
+			crew_member["melee_weapon"] = _get_bat_weapon()
+
+
+func _get_bat_weapon() -> Dictionary:
+	return {
+		"name": "Baseball Bat",
+		"weapon_type": "bat",
+		"damage": 18,
+		"range": 72,
+		"arc_degrees": 95,
+		"swing_cooldown": 0.6,
+		"swing_duration": 0.16,
+		"knockback": 90,
+	}
 
 
 func _read_dictionary_array(value: Variant) -> Array:
@@ -857,39 +1159,66 @@ func _find_crew_index(crew_id: String) -> int:
 	return -1
 
 
+func _find_hire_candidate_index(candidate_id: String) -> int:
+	for index in range(hire_candidates.size()):
+		var candidate: Variant = hire_candidates[index]
+		if candidate is Dictionary and str(candidate.get("id", "")) == candidate_id:
+			return index
+	return -1
+
+
 func _is_crew_member_alive(crew_member: Dictionary) -> bool:
 	return int(crew_member.get("health", 1)) > 0
 
 
-func _find_idle_runner_index() -> int:
+func _find_idle_transporter_index() -> int:
 	for index in range(crew_roster.size()):
 		var crew_member: Variant = crew_roster[index]
 		if not (crew_member is Dictionary):
 			continue
 		if not _is_crew_member_alive(crew_member):
 			continue
-		if str(crew_member.get("job", "")) != "Runner":
+		if not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, "transporter"):
 			continue
 		if str(crew_member.get("status", "Ready")) != "Ready":
 			continue
-		var task_types: Variant = crew_member.get("task_types", [])
-		if task_types is Array and task_types.has("transport"):
+		if NPC_ROLE_CATALOG_SCRIPT.can_do_task_type(crew_member, "transport"):
 			return index
 	return -1
 
 
-func _has_runner() -> bool:
+func _find_idle_runner_index() -> int:
+	return _find_idle_transporter_index()
+
+
+func _has_transporter() -> bool:
 	for crew_member in crew_roster:
 		if not (crew_member is Dictionary):
 			continue
 		if not _is_crew_member_alive(crew_member):
 			continue
-		if str(crew_member.get("job", "")) != "Runner":
+		if not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, "transporter"):
 			continue
-		var task_types: Variant = crew_member.get("task_types", [])
-		if task_types is Array and task_types.has("transport"):
+		if NPC_ROLE_CATALOG_SCRIPT.can_do_task_type(crew_member, "transport"):
 			return true
 	return false
+
+
+func _has_runner() -> bool:
+	return _has_transporter()
+
+
+func _get_best_transporter_carry_capacity_kg() -> int:
+	var best_capacity := RUNNER_CARRY_CAPACITY_KG
+	for crew_member in crew_roster:
+		if not (crew_member is Dictionary):
+			continue
+		if not _is_crew_member_alive(crew_member):
+			continue
+		if not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, "transporter"):
+			continue
+		best_capacity = max(best_capacity, NPC_ROLE_CATALOG_SCRIPT.get_carry_capacity_kg(crew_member, RUNNER_CARRY_CAPACITY_KG))
+	return best_capacity
 
 
 func _find_dispatchable_trade_order_id() -> String:
@@ -924,8 +1253,28 @@ func _is_trade_good_unlocked(good_id: String) -> bool:
 
 
 func _is_trade_good_legal(good_id: String) -> bool:
+	return _get_trade_good_legality(good_id) == LEGALITY_LEGAL
+
+
+func _get_trade_good_legality(good_id: String) -> String:
 	var source: Dictionary = _get_trade_source(good_id)
-	return bool(source.get("legal", false))
+	if source.has("legality"):
+		return _normalize_legality(str(source.get("legality", LEGALITY_ILLICIT)))
+	return LEGALITY_LEGAL if bool(source.get("legal", false)) else LEGALITY_ILLICIT
+
+
+func _normalize_legality(value: String) -> String:
+	var normalized := value.strip_edges().to_lower()
+	match normalized:
+		LEGALITY_LEGAL, LEGALITY_ILLICIT, LEGALITY_CONTROLLED, LEGALITY_ILLEGAL, LEGALITY_TABOO:
+			return normalized
+		"illiegal":
+			return LEGALITY_ILLEGAL
+	return LEGALITY_ILLICIT
+
+
+func _format_legality_label(legality: String) -> String:
+	return _normalize_legality(legality).capitalize()
 
 
 func _take_remote_source_inventory(good_id: String, quantity: int) -> int:
@@ -1043,6 +1392,7 @@ func _decorate_trade_trip(trip: Dictionary) -> Dictionary:
 	decorated["status_label"] = _format_trade_trip_status(decorated)
 	decorated["eta_label"] = _format_trade_eta(float(decorated.get("eta_seconds", -1.0)), phase)
 	decorated["risk_label"] = str(decorated.get("risk_label", "Low"))
+	decorated["legality_label"] = _format_legality_label(_get_trade_good_legality(good_id))
 	return decorated
 
 
@@ -1050,13 +1400,20 @@ func _build_trade_trip_row(trip: Dictionary) -> Dictionary:
 	var decorated := _decorate_trade_trip(trip)
 	return {
 		"id": str(decorated.get("id", "")),
+		"order_id": str(decorated.get("order_id", "")),
+		"trip_id": str(decorated.get("id", "")),
 		"row_type": "trip",
 		"direction": str(decorated.get("direction", "")),
 		"type": str(decorated.get("type", "")),
 		"good_id": str(decorated.get("good_id", GOOD_KEY)),
 		"good_name": str(decorated.get("good_name", "Product")),
+		"legality_label": str(decorated.get("legality_label", "Unknown")),
 		"status": str(decorated.get("status_label", "In flight")),
 		"quantity": int(decorated.get("quantity", 0)),
+		"total_quantity": int(decorated.get("quantity", 0)),
+		"pending_quantity": 0,
+		"in_flight_quantity": int(decorated.get("quantity", 0)),
+		"completed_quantity": 0,
 		"unit_weight_kg": int(decorated.get("unit_weight_kg", 1)),
 		"holding_weight_kg": int(decorated.get("holding_weight_kg", 0)),
 		"load_weight_kg": int(decorated.get("load_weight_kg", 0)),
@@ -1064,6 +1421,11 @@ func _build_trade_trip_row(trip: Dictionary) -> Dictionary:
 		"eta_seconds": float(decorated.get("eta_seconds", -1.0)),
 		"eta_label": str(decorated.get("eta_label", "Calculating")),
 		"risk_label": str(decorated.get("risk_label", "Low")),
+		"market_id": str(decorated.get("market_id", active_market_id)),
+		"unit_price": int(decorated.get("unit_price", 0)),
+		"value": int(decorated.get("value", 0)),
+		"phase": str(decorated.get("phase", "")),
+		"picked_up": bool(decorated.get("picked_up", false)),
 	}
 
 
@@ -1173,11 +1535,13 @@ func _find_transport_task(task_id: String) -> Dictionary:
 
 
 func _crew_can_do_task(crew_member: Dictionary, task: Dictionary) -> bool:
+	var required_role: String = str(task.get("required_role", ""))
+	if required_role != "" and not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, required_role):
+		return false
 	var required_job: String = str(task.get("required_job", ""))
 	if required_job != "" and str(crew_member.get("job", "")) != required_job:
 		return false
-	var task_types: Variant = crew_member.get("task_types", [])
-	return task_types is Array and task_types.has("transport")
+	return NPC_ROLE_CATALOG_SCRIPT.can_do_task_type(crew_member, "transport")
 
 
 func _record_recent_production() -> void:
@@ -1198,7 +1562,14 @@ func _record_recent_production() -> void:
 func _emit_progression_events(events: Array) -> void:
 	for event in events:
 		if event is Dictionary:
+			_apply_progression_event_effects(event)
 			progression_event_triggered.emit(event)
+
+
+func _apply_progression_event_effects(event: Dictionary) -> void:
+	match str(event.get("type", "")):
+		"market_unlock":
+			unlock_trade_good(str(event.get("id", "")))
 
 
 func _resolve_market_id(market_id: String) -> String:

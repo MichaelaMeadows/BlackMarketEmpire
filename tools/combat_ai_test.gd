@@ -4,6 +4,7 @@ const BASIC_NPC_SCENE_PATH = "res://scenes/npc/BasicNpc.tscn"
 const COMBAT_AI_SCENE_PATH = "res://scenes/combat/CombatAiController.tscn"
 const GUN_COMPONENT_SCENE_PATH = "res://scenes/combat/GunComponent.tscn"
 const MELEE_COMPONENT_SCENE_PATH = "res://scenes/combat/MeleeComponent.tscn"
+const MAP_NAVIGATION_SCRIPT = preload("res://scripts/map_navigation.gd")
 
 var _failures: int = 0
 
@@ -31,6 +32,7 @@ func _run() -> void:
 	_test_burst_weapon_fires_followup_shots()
 	_test_ai_waits_for_reaction_before_firing()
 	_test_ai_forgets_stale_last_seen_targets()
+	_test_ai_discards_freed_current_target()
 	_test_ai_chases_last_seen_target_at_origin()
 	_test_ai_defaults_to_weapon_effective_range()
 	_test_ai_uses_updated_weapon_range_after_setup()
@@ -40,6 +42,9 @@ func _run() -> void:
 	_test_cover_prefers_actual_line_blockers()
 	_test_cover_search_respects_configured_radius()
 	_test_cover_rejects_ally_occupied_positions()
+	_test_ai_chases_around_map_blockers_with_navigation()
+	_test_navigation_cover_rejects_blocked_points()
+	_test_navigation_follow_keeps_squadmates_from_stacking()
 	_test_squad_reports_respect_faction_and_confidence()
 
 	if _failures == 0:
@@ -373,6 +378,23 @@ func _test_ai_forgets_stale_last_seen_targets() -> void:
 	_free_nodes([owner, target])
 
 
+func _test_ai_discards_freed_current_target() -> void:
+	var owner: CharacterBody2D = _new_unit("guard", "crew", Vector2.ZERO)
+	var target: CharacterBody2D = _new_unit("target", "rival", Vector2(160, 0))
+	var ai = _new_ai(owner, {
+		"hostile_factions": ["rival"],
+		"detection_radius": 400.0,
+		"attack_range": 120.0,
+	})
+
+	ai.notify_attacked_by(target)
+	target.free()
+	ai.tick_ai(0.1)
+	_expect(ai.current_target == null, "AI discards a freed current target without a script error")
+
+	_free_nodes([owner])
+
+
 func _test_ai_chases_last_seen_target_at_origin() -> void:
 	var owner: CharacterBody2D = _new_unit("guard", "crew", Vector2(100, 0))
 	var target: CharacterBody2D = _new_unit("target", "rival", Vector2.ZERO)
@@ -576,6 +598,88 @@ func _test_cover_rejects_ally_occupied_positions() -> void:
 	_free_nodes([owner, target, ally, blocker])
 
 
+func _test_ai_chases_around_map_blockers_with_navigation() -> void:
+	var owner: CharacterBody2D = _new_unit("guard", "crew", Vector2(64, 64))
+	var target: CharacterBody2D = _new_unit("target", "rival", Vector2(224, 64))
+	var ai = _new_ai(owner, {
+		"hostile_factions": ["rival"],
+		"detection_radius": 400.0,
+		"attack_range": 40.0,
+		"chase_speed": 120.0,
+	})
+	ai.set_navigation(_new_navigation({
+		"bounds": [0, 0, 320, 224],
+		"player_start": [64, 64],
+		"walls": [
+			{"id": "divider", "rect": [128, 0, 32, 128], "collides": true},
+		],
+	}))
+
+	for index in range(10):
+		ai.tick_ai(0.1)
+	_expect(ai.get_state_name() == "CHASING", "navigation AI chases target outside range")
+	_expect(owner.global_position.y > 72.0, "navigation AI routes around wall gap instead of moving straight through")
+
+	_free_nodes([owner, target])
+
+
+func _test_navigation_cover_rejects_blocked_points() -> void:
+	var owner: CharacterBody2D = _new_unit("guard", "crew", Vector2(80, 96))
+	var target: CharacterBody2D = _new_unit("target", "rival", Vector2(240, 96))
+	var ai = _new_ai(owner, {
+		"hostile_factions": ["rival"],
+		"detection_radius": 400.0,
+		"attack_range": 260.0,
+		"cover_health_fraction": 0.9,
+		"cover_search_radius": 140.0,
+	})
+	ai.set_navigation(_new_navigation({
+		"bounds": [0, 0, 320, 224],
+		"player_start": [80, 96],
+		"walls": [
+			{"id": "cover_wall", "rect": [128, 32, 32, 128], "collides": true},
+		],
+		"cover": [
+			{"id": "blocked_cover", "position": [144, 96], "quality": 100.0},
+			{"id": "reachable_cover", "position": [96, 176], "quality": 2.0},
+		],
+	}))
+	_get_health(owner).apply_damage(40)
+
+	ai.tick_ai(0.1)
+	_expect(["TAKING_COVER", "IN_COVER", "PEEKING"].has(ai.get_state_name()), "navigation AI enters cover behavior")
+	_expect(ai.cover_position.distance_to(Vector2(144, 96)) > 24.0, "navigation cover skips blocked authored point")
+
+	_free_nodes([owner, target])
+
+
+func _test_navigation_follow_keeps_squadmates_from_stacking() -> void:
+	var leader: CharacterBody2D = _new_unit("leader", "crew", Vector2(224, 64))
+	var first: CharacterBody2D = _new_unit("first", "crew", Vector2(64, 64))
+	var second: CharacterBody2D = _new_unit("second", "crew", Vector2(66, 72))
+	var navigation = _new_navigation({
+		"bounds": [0, 0, 320, 224],
+		"player_start": [64, 64],
+		"walls": [
+			{"id": "divider", "rect": [128, 0, 32, 128], "collides": true},
+		],
+	})
+	var first_ai = _new_ai(first, {"hostile_factions": ["rival"], "follow_speed": 100.0, "preferred_spacing": 48.0})
+	var second_ai = _new_ai(second, {"hostile_factions": ["rival"], "follow_speed": 100.0, "preferred_spacing": 48.0})
+	first_ai.set_navigation(navigation)
+	second_ai.set_navigation(navigation)
+	first_ai.set_follow_target(leader, 64.0)
+	second_ai.set_follow_target(leader, 64.0)
+
+	first_ai.tick_ai(0.1)
+	second_ai.tick_ai(0.1)
+	_expect(first_ai.get_state_name() == "FOLLOWING", "first navigation squadmate follows leader")
+	_expect(second_ai.get_state_name() == "FOLLOWING", "second navigation squadmate follows leader")
+	_expect(first.velocity.distance_to(second.velocity) > 0.01, "navigation squadmates apply spacing instead of stacking on one waypoint")
+
+	_free_nodes([leader, first, second])
+
+
 func _test_squad_reports_respect_faction_and_confidence() -> void:
 	var owner: CharacterBody2D = _new_unit("owner", "crew", Vector2.ZERO)
 	var ally: CharacterBody2D = _new_unit("ally", "crew", Vector2(60, 0))
@@ -678,6 +782,12 @@ func _equip_melee_weapon(owner: Node, weapon_data: Dictionary):
 	owner.add_child(melee_weapon)
 	owner.set("melee_weapon", melee_weapon)
 	return melee_weapon
+
+
+func _new_navigation(map_data: Dictionary):
+	var navigation = MAP_NAVIGATION_SCRIPT.new()
+	navigation.setup(map_data)
+	return navigation
 
 
 func _instantiate_scene(path: String):

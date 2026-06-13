@@ -10,12 +10,32 @@
 		"name": "Cypress House",
 		"tier": "house",
 		"owned": true,
+		"role_limits": {
+			"transporter": 5,
+			"muscle": 3,
+			"production": 0
+		},
 		"next_base_hint": "Industrial building"
 	},
 	"grid": {
 		"enabled": true,
 		"spacing": 80,
 		"color": [0.090, 0.100, 0.096, 1.0]
+	},
+	"sprite_assets": {
+		"planning_table": {"path": "res://assets/sprites/props/planning_table.svg", "size": [72, 48]},
+		"workbench": {"path": "res://assets/sprites/props/workbench.svg", "size": [80, 44]},
+		"bunk": {"path": "res://assets/sprites/props/bunk.svg", "size": [68, 100]},
+		"shelves": {"path": "res://assets/sprites/props/shelves.svg", "size": [48, 92]},
+		"wood_crates": {"path": "res://assets/sprites/props/wood_crates.svg", "size": [64, 48]},
+		"worn_sofa": {"path": "res://assets/sprites/props/worn_sofa.svg", "size": [96, 48]},
+		"coffee_table": {"path": "res://assets/sprites/props/coffee_table.svg", "size": [68, 44]},
+		"kitchen_counter": {"path": "res://assets/sprites/props/kitchen_counter.svg", "size": [112, 36]},
+		"fridge": {"path": "res://assets/sprites/props/fridge.svg", "size": [54, 64]},
+		"stove": {"path": "res://assets/sprites/props/stove.svg", "size": [54, 54]},
+		"bath_sink": {"path": "res://assets/sprites/props/bath_sink.svg", "size": [42, 32]},
+		"toilet": {"path": "res://assets/sprites/props/toilet.svg", "size": [38, 50]},
+		"laundry_boxes": {"path": "res://assets/sprites/props/laundry_boxes.svg", "size": [72, 58]}
 	},
 	"zones": [
 		{
@@ -46,11 +66,11 @@
 			"trim_color": [0.345, 0.300, 0.240],
 			"collides": false,
 			"rooms": [
-				{"id": "living_room", "name": "Living Room", "rect": [-492, -332, 472, 292], "slot_ids": ["planning_table"]},
-				{"id": "kitchen", "name": "Kitchen", "rect": [36, -332, 456, 292], "slot_ids": ["basic_workbench"]},
-				{"id": "bedroom", "name": "Bedroom", "rect": [-492, 40, 300, 352], "slot_ids": ["crew_bunk"]},
-				{"id": "bathroom", "name": "Bathroom", "rect": [-164, 40, 172, 180], "slot_ids": []},
-				{"id": "basement_storage", "name": "Basement Storage", "rect": [36, 40, 456, 352], "slot_ids": ["stash_shelf", "supply_crates"]}
+				{"id": "living_room", "name": "Living Room", "rect": [-492, -332, 472, 292], "floor_material": "worn_carpet", "color": [0.155, 0.095, 0.075], "slot_ids": ["planning_table"]},
+				{"id": "kitchen", "name": "Kitchen", "rect": [36, -332, 456, 292], "floor_material": "old_tile", "color": [0.125, 0.135, 0.115], "slot_ids": ["basic_workbench"]},
+				{"id": "bedroom", "name": "Bedroom", "rect": [-492, 40, 300, 352], "floor_material": "faded_carpet", "color": [0.120, 0.115, 0.135], "slot_ids": ["crew_bunk"]},
+				{"id": "bathroom", "name": "Bathroom", "rect": [-164, 40, 172, 180], "floor_material": "bath_tile", "color": [0.130, 0.145, 0.140], "slot_ids": []},
+				{"id": "basement_storage", "name": "Basement Storage", "rect": [36, 40, 456, 352], "floor_material": "bare_concrete", "color": [0.100, 0.105, 0.100], "slot_ids": ["stash_shelf", "supply_crates"]}
 			]
 		}
 	],
@@ -84,11 +104,27 @@
 	],
 	"props": [
 		{"id": "front_light", "type": "streetlight", "position": [-120, 520], "scale": 0.9, "visual_id": "porch_light", "collides": false},
-		{"id": "living_table_prop", "type": "furniture", "position": [-300, -180], "scale": 1.4, "color": [0.24, 0.17, 0.11], "visual_id": "planning_table", "collides": false},
-		{"id": "kitchen_bench_prop", "type": "furniture", "position": [270, -180], "scale": 1.3, "color": [0.28, 0.19, 0.12], "visual_id": "workbench", "collides": false},
-		{"id": "bed_bunk_prop", "type": "furniture", "position": [-340, 180], "scale": 1.5, "color": [0.18, 0.20, 0.22], "visual_id": "bunk", "collides": false},
-		{"id": "stash_shelf_prop", "type": "furniture", "position": [170, 150], "scale": 1.4, "color": [0.20, 0.16, 0.11], "visual_id": "shelves", "collides": false},
-		{"id": "supply_crates_prop", "type": "crate", "position": [355, 285], "scale": 1.4, "visual_id": "wood_crates", "collides": false},
+		{"id": "living_rug", "type": "rug", "position": [-330, -202], "scale": 1.55, "color": [0.34, 0.13, 0.11], "visual_id": "threadbare_rug", "collides": false},
+		{"id": "living_sofa", "type": "sofa", "position": [-410, -145], "scale": 1.25, "color": [0.15, 0.22, 0.20], "visual_id": "worn_sofa", "collides": false},
+		{"id": "living_coffee_table", "type": "table", "position": [-310, -185], "scale": 1.0, "color": [0.23, 0.15, 0.09], "visual_id": "coffee_table", "collides": false},
+		{"id": "planning_table_prop", "type": "table", "position": [-190, -190], "scale": 1.05, "color": [0.24, 0.17, 0.11], "visual_id": "planning_table", "collides": false},
+		{"id": "living_chair_a", "type": "chair", "position": [-185, -245], "scale": 0.9, "color": [0.20, 0.14, 0.10], "visual_id": "wood_chair", "collides": false},
+		{"id": "living_chair_b", "type": "chair", "position": [-180, -132], "scale": 0.9, "color": [0.20, 0.14, 0.10], "visual_id": "wood_chair", "collides": false},
+		{"id": "kitchen_counter_north", "type": "cabinet", "position": [170, -298], "scale": 1.8, "color": [0.24, 0.17, 0.11], "visual_id": "kitchen_counter", "collides": false},
+		{"id": "kitchen_sink", "type": "sink", "position": [80, -298], "scale": 1.05, "visual_id": "bath_sink", "collides": false},
+		{"id": "kitchen_fridge", "type": "appliance", "position": [420, -292], "scale": 1.05, "color": [0.20, 0.23, 0.22], "visual_id": "fridge", "collides": false},
+		{"id": "kitchen_stove", "type": "appliance", "position": [310, -292], "scale": 1.0, "color": [0.18, 0.19, 0.18], "visual_id": "stove", "collides": false},
+		{"id": "kitchen_workbench_prop", "type": "table", "position": [270, -160], "scale": 1.15, "color": [0.28, 0.19, 0.12], "visual_id": "workbench", "collides": false},
+		{"id": "bedroom_rug", "type": "rug", "position": [-350, 238], "scale": 1.2, "color": [0.14, 0.18, 0.28], "visual_id": "faded_blue_rug", "collides": false},
+		{"id": "bed_bunk_prop", "type": "bed", "position": [-420, 160], "scale": 1.0, "color": [0.18, 0.20, 0.22], "visual_id": "bunk", "collides": false},
+		{"id": "bedroom_dresser", "type": "cabinet", "position": [-260, 320], "scale": 1.1, "color": [0.19, 0.12, 0.08], "visual_id": "dresser", "collides": false},
+		{"id": "bathroom_sink", "type": "sink", "position": [-130, 88], "scale": 1.0, "visual_id": "bath_sink", "collides": false},
+		{"id": "bathroom_toilet", "type": "toilet", "position": [-72, 164], "scale": 1.0, "visual_id": "toilet", "collides": false},
+		{"id": "bathroom_laundry_stack", "type": "appliance", "position": [-82, 58], "scale": 0.82, "color": [0.21, 0.24, 0.24], "visual_id": "washer", "collides": false},
+		{"id": "stash_shelf_prop", "type": "shelf", "position": [170, 150], "scale": 1.25, "color": [0.20, 0.16, 0.11], "visual_id": "shelves", "collides": false},
+		{"id": "supply_crates_prop", "type": "boxes", "position": [355, 285], "scale": 1.1, "visual_id": "wood_crates", "collides": false},
+		{"id": "storage_laundry_boxes", "type": "boxes", "position": [80, 310], "scale": 0.95, "visual_id": "laundry_boxes", "collides": false},
+		{"id": "storage_old_shelf", "type": "shelf", "position": [430, 125], "scale": 1.0, "color": [0.16, 0.12, 0.09], "visual_id": "shelves", "collides": false},
 		{"id": "back_tree_a", "type": "tree", "position": [-560, -450], "radius": 36, "collision_radius": 16, "color": [0.12, 0.31, 0.15], "collides": true},
 		{"id": "back_tree_b", "type": "tree", "position": [560, -455], "radius": 42, "collision_radius": 18, "color": [0.10, 0.28, 0.13], "collides": true}
 	],
@@ -102,7 +138,7 @@
 			"position": [-300, -100],
 			"health": 85,
 			"color": [0.28, 0.68, 0.62],
-			"staff": {"job": "Runner", "status": "Ready", "upkeep": 10, "task_types": ["transport"]},
+			"staff": {"role": "transporter", "archetype": "dealer", "status": "Ready"},
 			"dialogue": ["Ten a week, and I can move simple stuff."]
 		}
 	],

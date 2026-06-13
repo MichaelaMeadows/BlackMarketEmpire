@@ -4,45 +4,58 @@ const PLAYER_SCENE := preload("res://scenes/player/Player.tscn")
 const CONTACT_SCENE := preload("res://scenes/market/MarketContact.tscn")
 const NPC_SCENE := preload("res://scenes/npc/BasicNpc.tscn")
 const MAP_LOADER_SCRIPT := preload("res://scripts/map_loader.gd")
+const NAVIGATION_MOVER_SCRIPT := preload("res://scripts/navigation_mover.gd")
 const PHONE_UI_SCRIPT := preload("res://scripts/phone_ui.gd")
+const GAME_STATE_SCRIPT := preload("res://scripts/autoload/game_state.gd")
 const HOME_MAP_PATH := "res://maps/starter_house.json"
 const DEFAULT_MAP_PATH := HOME_MAP_PATH
 const RUNNER_TRAVEL_SPEED := 120.0
 const RUNNER_AWAY_SECONDS := 4.0
+const CREW_ARRIVAL_SPEED := 105.0
+const ENEMY_THUG_NAMES := ["Rook", "Mack", "Vince", "Doyle", "Kane", "Rafe"]
 
 var player: CharacterBody2D
 var active_contact: Area2D
 var map_loader
 var phone_ui
+var game_state
 var hud_label: Label
 var ammo_label: Label
 var reload_button: Button
 var prompt_label: Label
 var status_label: Label
 var scope_label: Label
+var progression_dialog: AcceptDialog
 var spawned_npcs: Array = []
 var spawned_contacts: Array = []
 var active_runner_jobs: Dictionary = {}
+var active_crew_arrivals: Dictionary = {}
 var active_map_path := ""
 var home_map_path := HOME_MAP_PATH
+var next_enemy_attack_id := 1
+var starter_thug_attack_triggered := false
 
 func _ready() -> void:
+	game_state = _resolve_game_state()
 	_ensure_input_map()
 	_load_gameplay_map(DEFAULT_MAP_PATH)
 	_build_hud()
 	_build_phone()
-	GameState.state_changed.connect(_refresh_hud)
-	GameState.progression_event_triggered.connect(_on_progression_event_triggered)
+	game_state.state_changed.connect(_on_game_state_changed)
+	game_state.crew_hired.connect(_on_crew_hired)
+	game_state.progression_event_triggered.connect(_on_progression_event_triggered)
 	_refresh_hud()
-	_set_status("%s is yours. Open the phone to manage the base or plan a raid." % GameState.get_base_summary().get("name", map_loader.get_title()))
+	_set_status("%s is yours. Open the phone to manage the base or plan a raid." % game_state.get_base_summary().get("name", map_loader.get_title()))
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("phone"):
 		phone_ui.toggle()
 		get_viewport().set_input_as_handled()
 		return
 
+
+func _unhandled_input(event: InputEvent) -> void:
 	if phone_ui != null and phone_ui.is_open():
 		return
 
@@ -61,8 +74,19 @@ func _process(delta: float) -> void:
 	if map_loader != null and player != null:
 		map_loader.set_player_position(player.position)
 		_refresh_occluded_actor_visibility()
+	_update_crew_arrivals(delta)
 	_update_runner_jobs(delta)
 	_refresh_ammo_hud()
+
+
+func _resolve_game_state():
+	var state = get_node_or_null("/root/GameState")
+	if state != null:
+		return state
+	state = GAME_STATE_SCRIPT.new()
+	state.name = "GameState"
+	get_tree().root.add_child(state)
+	return state
 
 
 func _load_map(path: String) -> void:
@@ -77,9 +101,11 @@ func _load_gameplay_map(path: String) -> void:
 	_load_map(path)
 	if map_loader.get_base_data().has("id"):
 		home_map_path = path
-		GameState.initialize_base_from_map(map_loader.get_map_data())
+		game_state.initialize_base_from_map(map_loader.get_map_data())
 	_spawn_player()
 	_spawn_npcs()
+	if _is_home_map():
+		_sync_home_crew_visuals()
 	if not _is_home_map():
 		_spawn_raid_crew()
 	_spawn_contacts()
@@ -100,6 +126,7 @@ func _clear_gameplay_map() -> void:
 			npc.queue_free()
 	spawned_npcs.clear()
 	active_runner_jobs.clear()
+	active_crew_arrivals.clear()
 
 	if player != null and is_instance_valid(player):
 		player.queue_free()
@@ -151,12 +178,53 @@ func _spawn_npc_from_data(data: Dictionary, position_override: Variant = null):
 	add_child(npc)
 	spawned_npcs.append(npc)
 	npc.died.connect(_on_npc_died)
+	_configure_npc_navigation(npc)
 	_configure_player_crew_follow(npc)
 	return npc
 
 
+func _spawn_home_crew_member(crew_member: Dictionary, position: Vector2):
+	return _spawn_npc_from_data(_crew_member_to_npc_data(crew_member, position), position)
+
+
+func _crew_member_to_npc_data(crew_member: Dictionary, position: Vector2) -> Dictionary:
+	var crew_id := str(crew_member.get("id", ""))
+	var npc_data := {
+		"id": crew_id,
+		"crew_id": crew_id,
+		"name": str(crew_member.get("name", "Crew")),
+		"role": "crew",
+		"faction": "player_crew",
+		"visual_id": str(crew_member.get("visual_id", "crew_jacket")),
+		"position": [position.x, position.y],
+		"health": int(crew_member.get("health", 60)),
+		"color": crew_member.get("color", [0.28, 0.68, 0.62]),
+	}
+	if crew_member.has("ranged_weapon"):
+		npc_data["ranged_weapon"] = bool(crew_member.get("ranged_weapon", true))
+	if crew_member.has("weapon"):
+		npc_data["weapon"] = crew_member.get("weapon")
+	if crew_member.has("melee_weapon"):
+		npc_data["melee_weapon"] = crew_member.get("melee_weapon")
+	if str(crew_member.get("role", "")) == "muscle":
+		npc_data["ai"] = {
+			"enabled": true,
+			"faction": "player_crew",
+			"hostile_factions": ["rival", "law"],
+			"role": "assault",
+			"detection_radius": 360,
+			"attack_range": _get_melee_attack_range(npc_data, 72.0),
+			"preferred_range": 52,
+			"chase_speed": 165,
+			"reaction_time": 0.12,
+			"target_memory_seconds": 2.0,
+			"squad_id": "home_guard",
+		}
+	return npc_data
+
+
 func _spawn_raid_crew() -> void:
-	var roster: Array = GameState.get_crew_roster()
+	var roster: Array = game_state.get_crew_roster()
 	var offsets := [
 		Vector2(-58.0, 36.0),
 		Vector2(-92.0, 78.0),
@@ -170,7 +238,7 @@ func _spawn_raid_crew() -> void:
 			"name": str(crew_member.get("name", "Crew")),
 			"role": "crew",
 			"faction": "player_crew",
-			"visual_id": "crew_jacket",
+			"visual_id": str(crew_member.get("visual_id", "crew_jacket")),
 			"health": int(crew_member.get("health", 80)),
 			"color": crew_member.get("color", [0.28, 0.68, 0.62]),
 			"ai": {
@@ -186,17 +254,12 @@ func _spawn_raid_crew() -> void:
 				"target_memory_seconds": 1.8,
 				"squad_id": "player_raid",
 			},
-			"melee_weapon": {
-				"name": "Short Bat",
-				"weapon_type": "bat",
-				"damage": 16,
-				"range": 68,
-				"arc_degrees": 90,
-				"swing_cooldown": 0.7,
-				"swing_duration": 0.16,
-				"knockback": 90,
-			},
+			"melee_weapon": crew_member.get("melee_weapon", _get_bat_weapon(16)),
 		}
+		if crew_member.has("ranged_weapon"):
+			crew_data["ranged_weapon"] = bool(crew_member.get("ranged_weapon", true))
+		if crew_member.has("weapon"):
+			crew_data["weapon"] = crew_member.get("weapon")
 		var offset: Vector2 = offsets[index % offsets.size()]
 		_spawn_npc_from_data(crew_data, player.position + offset)
 
@@ -264,6 +327,11 @@ func _build_hud() -> void:
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(status_label)
 
+	progression_dialog = AcceptDialog.new()
+	progression_dialog.title = "New Lead"
+	progression_dialog.min_size = Vector2i(420, 0)
+	canvas.add_child(progression_dialog)
+
 
 func _on_contact_presence_changed(contact: Area2D, is_near: bool) -> void:
 	if is_near:
@@ -291,21 +359,23 @@ func _try_contact_action(required_type: String) -> void:
 		"buyer":
 			result = _place_trade_order("sell")
 		"fixer":
-			result = GameState.pay_fixer()
+			result = game_state.pay_fixer()
 		_:
 			result = _place_trade_order("buy")
 
 	_set_status(result["message"])
 
 
-func _place_trade_order(order_type: String, good_id: String = GameState.GOOD_KEY, quantity: int = -1) -> Dictionary:
+func _place_trade_order(order_type: String, good_id: String = "", quantity: int = -1) -> Dictionary:
 	if not _is_home_map():
-		return _result(false, "Trade runners can only be sent from home.")
+		return _result(false, "Transporters can only be sent from home.")
+	if good_id == "":
+		good_id = str(game_state.GOOD_KEY)
 	var result: Dictionary
 	if order_type == "sell":
-		result = GameState.place_sell_order(quantity, -1, good_id)
+		result = game_state.place_sell_order(quantity, -1, good_id)
 	else:
-		result = GameState.place_buy_order(quantity, -1, good_id)
+		result = game_state.place_buy_order(quantity, -1, good_id)
 	if bool(result.get("ok", false)):
 		_start_runner_trips(result.get("trips", []))
 	return result
@@ -314,14 +384,14 @@ func _place_trade_order(order_type: String, good_id: String = GameState.GOOD_KEY
 func _refresh_hud() -> void:
 	if hud_label == null or scope_label == null:
 		return
-	var base_summary: Dictionary = GameState.get_base_summary()
+	var base_summary: Dictionary = game_state.get_base_summary()
 	hud_label.text = "Base: %s    Cash: $%d    Inventory: %d/%d KG    Heat: %d%%    Crew: %d" % [
 		str(base_summary.get("name", "No Base")),
-		GameState.cash,
-		GameState.get_storage_used(),
-		GameState.get_storage_capacity(),
-		GameState.heat,
-		GameState.get_ready_crew_count(),
+		game_state.cash,
+		game_state.get_storage_used(),
+		game_state.get_storage_capacity(),
+		game_state.heat,
+		game_state.get_ready_crew_count(),
 	]
 	if _is_home_map():
 		scope_label.text = "%s tier. Next base: %s." % [
@@ -329,7 +399,7 @@ func _refresh_hud() -> void:
 			str(base_summary.get("next_base_hint", "Unknown")),
 		]
 	else:
-		var active_raid: Dictionary = GameState.get_active_raid_target()
+		var active_raid: Dictionary = game_state.get_active_raid_target()
 		scope_label.text = "Raid: %s. Use the phone's Raids app to return home." % str(active_raid.get("name", map_loader.get_title()))
 	_refresh_prompt()
 
@@ -360,17 +430,102 @@ func _on_npc_died(npc: CharacterBody2D) -> void:
 		var crew_id := str(npc.get_meta("crew_id", npc.get_meta("npc_id", "")))
 		active_runner_jobs.erase(crew_id)
 		active_runner_jobs.erase(str(npc.get_meta("npc_id", "")))
-		var result: Dictionary = GameState.remove_crew_member(crew_id)
+		var result: Dictionary = game_state.remove_crew_member(crew_id)
 		_set_status(str(result.get("message", "Crew member died.")))
 		_refresh_hud()
 		return
-	GameState.record_kill("npc")
+	game_state.record_kill("npc")
+
+
+func _on_game_state_changed() -> void:
+	_refresh_hud()
+	if _is_home_map():
+		call_deferred("_sync_home_crew_visuals")
+
+
+func _on_crew_hired(crew_member: Dictionary) -> void:
+	if not _is_home_map():
+		return
+	var crew_id := str(crew_member.get("id", ""))
+	if crew_id == "" or _find_spawned_npc_by_id(crew_id) != null:
+		_maybe_trigger_starter_thug_attack()
+		return
+	var roster_index := _get_roster_index(crew_id)
+	var target := _get_crew_idle_position(crew_member, roster_index)
+	var entry_position := _get_crew_entry_position(target)
+	_spawn_home_crew_member(crew_member, entry_position)
+	active_crew_arrivals[crew_id] = {"target": target}
+	_maybe_trigger_starter_thug_attack()
 
 
 func _on_progression_event_triggered(event: Dictionary) -> void:
 	var message: String = str(event.get("message", ""))
 	if message != "":
 		_set_status(message)
+		if str(event.get("type", "")) == "event":
+			_show_progression_popup(message)
+
+
+func _show_progression_popup(message: String) -> void:
+	if progression_dialog == null:
+		return
+	progression_dialog.dialog_text = message
+	progression_dialog.popup_centered(Vector2i(460, 180))
+
+
+func _sync_home_crew_visuals() -> void:
+	if not _is_home_map() or map_loader == null:
+		return
+	var roster: Array = game_state.get_crew_roster()
+	var crew_by_id: Dictionary = {}
+	for crew_member in roster:
+		if crew_member is Dictionary:
+			crew_by_id[str(crew_member.get("id", ""))] = crew_member
+
+	for index in range(spawned_npcs.size() - 1, -1, -1):
+		var npc = spawned_npcs[index]
+		if not is_instance_valid(npc):
+			spawned_npcs.remove_at(index)
+			continue
+		if not npc.has_method("get_faction") or str(npc.get_faction()) != "player_crew":
+			continue
+		var crew_id := str(npc.get_meta("crew_id", npc.get_meta("npc_id", "")))
+		var crew_member: Dictionary = crew_by_id.get(crew_id, {})
+		if crew_member.is_empty() or (not _should_show_home_crew(crew_member) and not active_runner_jobs.has(crew_id)):
+			active_crew_arrivals.erase(crew_id)
+			npc.queue_free()
+			spawned_npcs.remove_at(index)
+
+	for roster_index in range(roster.size()):
+		var crew_member: Variant = roster[roster_index]
+		if not (crew_member is Dictionary):
+			continue
+		if not _should_show_home_crew(crew_member):
+			continue
+		var crew_id := str(crew_member.get("id", ""))
+		if crew_id == "" or _find_spawned_npc_by_id(crew_id) != null:
+			continue
+		_spawn_home_crew_member(crew_member, _get_crew_idle_position(crew_member, roster_index))
+
+
+func _should_show_home_crew(crew_member: Dictionary) -> bool:
+	return str(crew_member.get("status", "Ready")) == "Ready"
+
+
+func _update_crew_arrivals(delta: float) -> void:
+	if active_crew_arrivals.is_empty():
+		return
+	for crew_id in active_crew_arrivals.keys():
+		if not active_crew_arrivals.has(crew_id):
+			continue
+		var npc = _find_spawned_npc_by_id(str(crew_id))
+		if npc == null:
+			active_crew_arrivals.erase(crew_id)
+			continue
+		var arrival: Dictionary = active_crew_arrivals[crew_id]
+		var target: Vector2 = arrival.get("target", npc.position)
+		if NAVIGATION_MOVER_SCRIPT.move_towards(npc, target, CREW_ARRIVAL_SPEED, delta, _get_navigation()):
+			active_crew_arrivals.erase(crew_id)
 
 
 func _refresh_occluded_actor_visibility() -> void:
@@ -393,12 +548,12 @@ func _refresh_occluded_actor_visibility() -> void:
 
 
 func join_raid(target_id: String) -> Dictionary:
-	var result: Dictionary = GameState.start_raid(target_id, true)
+	var result: Dictionary = game_state.start_raid(target_id, true)
 	if not bool(result.get("ok", false)):
 		_set_status(str(result.get("message", "Could not start raid.")))
 		return result
 
-	var target: Dictionary = GameState.resolve_raid_target(target_id)
+	var target: Dictionary = game_state.resolve_raid_target(target_id)
 	var path := str(target.get("path", ""))
 	if path == "":
 		_set_status("Raid target has no map.")
@@ -409,10 +564,86 @@ func join_raid(target_id: String) -> Dictionary:
 
 
 func return_home() -> void:
-	if not _is_home_map() and not GameState.get_active_raid_target().is_empty():
-		var result: Dictionary = GameState.complete_active_raid(true)
+	if not _is_home_map() and not game_state.get_active_raid_target().is_empty():
+		var result: Dictionary = game_state.complete_active_raid(true)
 		_set_status(str(result.get("message", "Returned home.")))
 	_load_gameplay_map(home_map_path)
+
+
+func trigger_random_enemy_thug_attack(seed: int = -1) -> Dictionary:
+	if not _is_home_map():
+		return _result(false, "Base attacks can only trigger at home.")
+	var rng := RandomNumberGenerator.new()
+	if seed >= 0:
+		rng.seed = seed
+	else:
+		rng.randomize()
+	var entry_positions := [
+		Vector2(0.0, 560.0),
+		Vector2(-520.0, 520.0),
+		Vector2(520.0, 520.0),
+		Vector2(-640.0, -450.0),
+		Vector2(640.0, -450.0),
+	]
+	var entry_position: Vector2 = _get_navigable_position(entry_positions[rng.randi_range(0, entry_positions.size() - 1)])
+	var enemy_id := "enemy_thug_attack_%d" % next_enemy_attack_id
+	next_enemy_attack_id += 1
+	var enemy_data := {
+		"id": enemy_id,
+		"name": "%s the Thug" % ENEMY_THUG_NAMES[rng.randi_range(0, ENEMY_THUG_NAMES.size() - 1)],
+		"role": "thug",
+		"faction": "rival",
+		"visual_id": "rival_thug",
+		"position": [entry_position.x, entry_position.y],
+		"health": 70,
+		"color": [0.66, 0.24, 0.20],
+		"ranged_weapon": false,
+		"weapon": null,
+		"melee_weapon": _get_bat_weapon(16),
+		"ai": {
+			"enabled": true,
+			"faction": "rival",
+			"hostile_factions": ["player", "player_crew"],
+			"role": "assault",
+			"detection_radius": 620,
+			"attack_range": 72,
+			"preferred_range": 52,
+			"chase_speed": 175,
+			"reaction_time": 0.10,
+			"target_memory_seconds": 3.0,
+			"squad_id": "base_attack_%d" % next_enemy_attack_id,
+		},
+	}
+	var enemy = _spawn_npc_from_data(enemy_data, entry_position)
+	_force_npc_target(enemy, _get_base_attack_target())
+	_set_status("An enemy thug is coming at the house.")
+	return {
+		"ok": enemy != null,
+		"message": "Enemy thug attack triggered.",
+		"enemy_id": enemy_id,
+		"enemy": enemy,
+	}
+
+
+func _maybe_trigger_starter_thug_attack() -> void:
+	if starter_thug_attack_triggered or not _is_home_map():
+		return
+	if game_state.get_ready_crew_count("muscle") < 2:
+		return
+	starter_thug_attack_triggered = true
+	call_deferred("trigger_random_enemy_thug_attack")
+
+
+func _get_base_attack_target() -> Node2D:
+	return player
+
+
+func _force_npc_target(npc: Node, target: Node2D) -> void:
+	if npc == null or target == null:
+		return
+	var combat_ai = npc.get("combat_ai")
+	if combat_ai != null and combat_ai.has_method("force_target"):
+		combat_ai.force_target(target, 1.0)
 
 
 func _on_raid_join_requested(target_id: String) -> void:
@@ -440,6 +671,14 @@ func _configure_player_crew_follow(npc: Node) -> void:
 	var combat_ai = npc.get("combat_ai")
 	if combat_ai != null and combat_ai.has_method("set_follow_target"):
 		combat_ai.set_follow_target(player, 88.0, 260.0)
+
+
+func _configure_npc_navigation(npc: Node) -> void:
+	if npc == null:
+		return
+	var combat_ai = npc.get("combat_ai")
+	if combat_ai != null and combat_ai.has_method("set_navigation"):
+		combat_ai.set_navigation(_get_navigation())
 
 
 func _start_runner_trips(trips: Array) -> void:
@@ -500,16 +739,16 @@ func _update_runner_jobs(delta: float) -> void:
 			"to_storage":
 				if _move_runner_towards(npc, job.get("storage_position", Vector2.ZERO), delta):
 					if str(job.get("type", "")) == "sell":
-						var pickup_result: Dictionary = GameState.pick_up_sell_order(str(job.get("trip_id", "")))
+						var pickup_result: Dictionary = game_state.pick_up_sell_order(str(job.get("trip_id", "")))
 						if not bool(pickup_result.get("ok", false)):
 							_finish_runner_job(str(crew_id), npc)
 							_set_status(str(pickup_result.get("message", "Sell order canceled.")))
-							_start_runner_trips(GameState.dispatch_queued_trade_trips())
+							_start_runner_trips(game_state.dispatch_queued_trade_trips())
 							continue
 						job["phase"] = "to_exit"
 						_set_status(str(pickup_result.get("message", "")))
 					else:
-						var deposit_result: Dictionary = GameState.deposit_buy_order(str(job.get("trip_id", "")))
+						var deposit_result: Dictionary = game_state.deposit_buy_order(str(job.get("trip_id", "")))
 						if bool(deposit_result.get("ok", false)):
 							_finish_runner_job(str(crew_id), npc)
 							_set_status(str(deposit_result.get("message", "")))
@@ -521,7 +760,7 @@ func _update_runner_jobs(delta: float) -> void:
 			"waiting_storage":
 				job["retry_timer"] = max(0.0, float(job.get("retry_timer", 0.0)) - delta)
 				if float(job.get("retry_timer", 0.0)) <= 0.0:
-					var retry_result: Dictionary = GameState.deposit_buy_order(str(job.get("trip_id", "")))
+					var retry_result: Dictionary = game_state.deposit_buy_order(str(job.get("trip_id", "")))
 					if bool(retry_result.get("ok", false)):
 						_finish_runner_job(str(crew_id), npc)
 						_set_status(str(retry_result.get("message", "")))
@@ -537,27 +776,17 @@ func _update_runner_jobs(delta: float) -> void:
 					job["phase"] = "return_idle"
 			"return_idle":
 				if _move_runner_towards(npc, job.get("idle_position", Vector2.ZERO), delta):
-					var sell_result: Dictionary = GameState.complete_sell_order(str(job.get("trip_id", "")))
+					var sell_result: Dictionary = game_state.complete_sell_order(str(job.get("trip_id", "")))
 					_finish_runner_job(str(crew_id), npc)
 					_set_status(str(sell_result.get("message", "")))
 					_start_runner_trips(sell_result.get("trips", []))
 					continue
-		GameState.update_trade_trip_progress(str(job.get("trip_id", "")), str(job.get("phase", "")), _estimate_runner_job_eta(job, npc))
+		game_state.update_trade_trip_progress(str(job.get("trip_id", "")), str(job.get("phase", "")), _estimate_runner_job_eta(job, npc))
 		active_runner_jobs[crew_id] = job
 
 
 func _move_runner_towards(npc: CharacterBody2D, target: Vector2, delta: float) -> bool:
-	var offset: Vector2 = target - npc.position
-	if offset.length() <= 8.0:
-		npc.position = target
-		npc.velocity = Vector2.ZERO
-		return true
-	var direction: Vector2 = offset.normalized()
-	npc.velocity = direction * RUNNER_TRAVEL_SPEED
-	npc.position += npc.velocity * delta
-	if npc.has_method("set_facing_direction"):
-		npc.set_facing_direction(direction)
-	return false
+	return NAVIGATION_MOVER_SCRIPT.move_towards(npc, target, RUNNER_TRAVEL_SPEED, delta, _get_navigation())
 
 
 func _estimate_runner_job_eta(job: Dictionary, npc: CharacterBody2D) -> float:
@@ -589,7 +818,7 @@ func _estimate_runner_job_eta(job: Dictionary, npc: CharacterBody2D) -> float:
 
 
 func _travel_seconds(from_position: Vector2, to_position: Vector2) -> float:
-	return from_position.distance_to(to_position) / RUNNER_TRAVEL_SPEED
+	return _estimate_navigation_distance(from_position, to_position) / RUNNER_TRAVEL_SPEED
 
 
 func _finish_runner_job(crew_id: String, npc: CharacterBody2D) -> void:
@@ -601,9 +830,85 @@ func _finish_runner_job(crew_id: String, npc: CharacterBody2D) -> void:
 
 func _find_spawned_npc_by_id(npc_id: String):
 	for npc in spawned_npcs:
-		if is_instance_valid(npc) and str(npc.get_meta("npc_id", "")) == npc_id:
+		if not is_instance_valid(npc):
+			continue
+		if str(npc.get_meta("npc_id", "")) == npc_id or str(npc.get_meta("crew_id", "")) == npc_id:
 			return npc
 	return null
+
+
+func _get_roster_index(crew_id: String) -> int:
+	var roster: Array = game_state.get_crew_roster()
+	for index in range(roster.size()):
+		var crew_member: Variant = roster[index]
+		if crew_member is Dictionary and str(crew_member.get("id", "")) == crew_id:
+			return index
+	return max(0, roster.size() - 1)
+
+
+func _get_crew_idle_position(crew_member: Dictionary, roster_index: int) -> Vector2:
+	var home_position := _read_vector2(crew_member.get("home_position", []))
+	if home_position != Vector2.ZERO:
+		return _get_navigable_position(home_position)
+
+	var transporter_positions: Array[Vector2] = [
+		Vector2(-252.0, -108.0),
+		Vector2(-382.0, -108.0),
+		Vector2(-312.0, 104.0),
+		Vector2(206.0, 104.0),
+		Vector2(338.0, 244.0),
+	]
+	var muscle_positions: Array[Vector2] = [
+		Vector2(-186.0, -244.0),
+		Vector2(-186.0, -132.0),
+		Vector2(420.0, 128.0),
+	]
+	var production_positions: Array[Vector2] = [
+		Vector2(270.0, -160.0),
+		Vector2(170.0, -238.0),
+	]
+	var positions: Array[Vector2] = transporter_positions
+	match str(crew_member.get("role", "")):
+		"muscle":
+			positions = muscle_positions
+		"production":
+			positions = production_positions
+	var index: int = max(0, roster_index) % positions.size()
+	return _get_navigable_position(positions[index])
+
+
+func _get_crew_entry_position(target: Vector2) -> Vector2:
+	var preferred_entry := Vector2(0.0, 672.0)
+	if map_loader == null:
+		return preferred_entry
+	return _get_navigable_position(preferred_entry)
+
+
+func _get_navigable_position(position: Vector2) -> Vector2:
+	var navigation = _get_navigation()
+	if navigation != null and navigation.has_method("find_nearest_walkable"):
+		return navigation.find_nearest_walkable(position)
+	return position
+
+
+func _get_bat_weapon(damage: int = 18) -> Dictionary:
+	return {
+		"name": "Baseball Bat",
+		"weapon_type": "bat",
+		"damage": damage,
+		"range": 72,
+		"arc_degrees": 95,
+		"swing_cooldown": 0.6,
+		"swing_duration": 0.16,
+		"knockback": 90,
+	}
+
+
+func _get_melee_attack_range(npc_data: Dictionary, fallback: float) -> float:
+	var melee_data: Variant = npc_data.get("melee_weapon", {})
+	if melee_data is Dictionary:
+		return float(melee_data.get("range", fallback))
+	return fallback
 
 
 func _get_storage_position() -> Vector2:
@@ -633,6 +938,27 @@ func _get_exit_position(from_position: Vector2) -> Vector2:
 			best_distance = distance
 			best = candidate
 	return best
+
+
+func _get_navigation():
+	if map_loader != null and map_loader.has_method("get_navigation"):
+		return map_loader.get_navigation()
+	return null
+
+
+func _estimate_navigation_distance(from_position: Vector2, to_position: Vector2) -> float:
+	var navigation = _get_navigation()
+	if navigation == null or not navigation.has_method("find_path"):
+		return from_position.distance_to(to_position)
+	var path: PackedVector2Array = navigation.find_path(from_position, to_position)
+	if path.is_empty():
+		return from_position.distance_to(to_position)
+	var distance := 0.0
+	var cursor := from_position
+	for waypoint in path:
+		distance += cursor.distance_to(waypoint)
+		cursor = waypoint
+	return distance
 
 
 func _is_home_map() -> bool:

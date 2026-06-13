@@ -10,11 +10,13 @@ var _failures: int = 0
 func _init() -> void:
 	_test_rules_load()
 	_test_sale_value_unlocks_once()
+	_test_starting_good_sale_value_unlocks_market_item()
 	_test_specific_item_sales_unlock()
 	_test_kill_event_unlock()
 	_test_random_interval_rule()
 	_test_generic_metric_payload()
 	_test_game_state_records_sale_progress()
+	_test_game_state_unlocks_market_item_after_starting_good_sales()
 	_test_game_state_records_daily_production_progress()
 
 	if _failures == 0:
@@ -51,6 +53,25 @@ func _test_sale_value_unlocks_once() -> void:
 	_expect(_count_event(second, "bulk_buyer_intro") == 1, "sale value unlock fires when threshold is crossed")
 	_expect(third.is_empty(), "non-repeat sale value rule does not fire twice")
 	_expect(tracker.get_metric("sold_value") == 130.0, "sale value metric accumulates")
+
+
+func _test_starting_good_sale_value_unlocks_market_item() -> void:
+	var tracker = _new_tracker(9)
+	var first: Array = tracker.record_event("sale", {
+		"item_id": "fast_food",
+		"quantity": 19,
+		"value": 190,
+	})
+	var second: Array = tracker.record_event("sale", {
+		"item_id": "fast_food",
+		"quantity": 1,
+		"value": 10,
+	})
+	_expect(_count_event(first, "bootleg_media") == 0, "starting good sales below threshold do not unlock market item")
+	_expect(tracker.is_unlocked("bootleg_media_intro"), "starting good sale value unlocks intro flag")
+	_expect(_count_event(second, "bootleg_media") == 1, "starting good sale value triggers market item unlock")
+	_expect(_count_event(second, "bootleg_media_popup") == 1, "starting good sale value triggers popup event")
+	_expect(tracker.get_metric("sold_value", "fast_food") == 200.0, "item sale value metric accumulates by starting good")
 
 
 func _test_specific_item_sales_unlock() -> void:
@@ -119,10 +140,35 @@ func _test_generic_metric_payload() -> void:
 func _test_game_state_records_sale_progress() -> void:
 	var state = GAME_STATE_SCRIPT.new()
 	state._ready()
+	var early_goods: Array = state.get_available_trade_goods()
+	_expect(early_goods.size() == 1, "GameState starts with only the starting market good")
 	state.inventory["street_goods"] = 20
 	state.sell_to_buyer(12, 10, "street_goods")
 	_expect(state.is_unlocked("bulk_buyer_intro"), "GameState sale records value progression")
 	_expect(state.is_unlocked("street_goods_route"), "GameState sale records item quantity progression")
+	state.free()
+
+
+func _test_game_state_unlocks_market_item_after_starting_good_sales() -> void:
+	var state = GAME_STATE_SCRIPT.new()
+	state._ready()
+	state.inventory["fast_food"] = 20
+	var first_events: Array = state.record_progression_event("sale", {
+		"item_id": "fast_food",
+		"quantity": 19,
+		"value": 190,
+	})
+	_expect(_count_event(first_events, "bootleg_media") == 0, "GameState keeps new market item locked below threshold")
+	_expect(state.get_available_trade_goods().size() == 1, "locked market item stays hidden below threshold")
+	var second_events: Array = state.record_progression_event("sale", {
+		"item_id": "fast_food",
+		"quantity": 1,
+		"value": 10,
+	})
+	var goods: Array = state.get_available_trade_goods()
+	_expect(_count_event(second_events, "bootleg_media") == 1, "GameState receives market item unlock event")
+	_expect(_has_trade_good(goods, "bootleg_media"), "GameState exposes newly unlocked market item")
+	_expect(_count_event(second_events, "bootleg_media_popup") == 1, "GameState receives popup event for new market item")
 	state.free()
 
 
@@ -147,6 +193,13 @@ func _count_event(events: Array, event_id: String) -> int:
 		if event is Dictionary and str(event.get("id", "")) == event_id:
 			count += 1
 	return count
+
+
+func _has_trade_good(goods: Array, good_id: String) -> bool:
+	for item in goods:
+		if item is Dictionary and str(item.get("id", "")) == good_id:
+			return true
+	return false
 
 
 func _expect(condition: bool, label: String) -> void:

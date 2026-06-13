@@ -1,6 +1,6 @@
 {
   "goods": [
-    {"id": "fast_food", "name": "Fast-Food", "category": "legal", "base_price": 5, "spread": 0.08, "volatility": 0.01, "basic_anchor": true, "anchor_min": 4, "anchor_max": 7, "anchor_supply": 9999, "tags": ["legal", "food", "anchor"]},
+    {"id": "fast_food", "name": "Fast Food", "category": "legal", "base_price": 5, "spread": 0.08, "volatility": 0.01, "basic_anchor": true, "anchor_min": 4, "anchor_max": 7, "anchor_supply": 9999, "tags": ["legal", "food", "anchor"]},
     {"id": "industrial_supplies", "name": "Industrial Supplies", "category": "basic", "base_price": 12, "spread": 0.10, "volatility": 0.03, "basic_anchor": true, "anchor_min": 10, "anchor_max": 15, "anchor_supply": 900, "tags": ["legal", "anchor"]},
     {"id": "grocery_supplies", "name": "Grocery Supplies", "category": "basic", "base_price": 8, "spread": 0.08, "volatility": 0.02, "basic_anchor": true, "anchor_min": 7, "anchor_max": 10, "anchor_supply": 1000, "tags": ["legal", "anchor"]},
     {"id": "growing_supplies", "name": "Growing Supplies", "category": "basic", "base_price": 18, "spread": 0.12, "volatility": 0.04, "basic_anchor": true, "anchor_min": 15, "anchor_max": 23, "anchor_supply": 650, "tags": ["legal", "anchor"]},

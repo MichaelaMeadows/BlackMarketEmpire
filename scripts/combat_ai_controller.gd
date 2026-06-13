@@ -49,6 +49,7 @@ var cover_reuse_remaining := 0.0
 var state := AiState.IDLE
 var _uses_weapon_attack_range := true
 var _uses_weapon_preferred_range := true
+var navigation
 
 
 func setup(new_owner: CharacterBody2D, config: Dictionary = {}) -> void:
@@ -76,7 +77,13 @@ func setup(new_owner: CharacterBody2D, config: Dictionary = {}) -> void:
 	cover_reuse_seconds = max(0.0, float(config.get("cover_reuse_seconds", cover_reuse_seconds)))
 	suppression_cover_threshold = max(0.0, float(config.get("suppression_cover_threshold", suppression_cover_threshold)))
 	hold_distance_tolerance = max(0.0, float(config.get("hold_distance_tolerance", hold_distance_tolerance)))
+	if config.has("navigation"):
+		set_navigation(config.get("navigation"))
 	add_to_group("combat_ai")
+
+
+func set_navigation(new_navigation) -> void:
+	navigation = new_navigation
 
 
 func set_follow_target(target: Node2D, distance: float = -1.0, leash: float = -1.0) -> void:
@@ -93,6 +100,14 @@ func clear_follow_target() -> void:
 
 func set_hostile_factions(new_hostile_factions: Array) -> void:
 	hostile_factions = _read_string_array(new_hostile_factions)
+
+
+func force_target(target: Node2D, confidence: float = 1.0) -> void:
+	if target == null or not _is_valid_target(target):
+		return
+	if not is_hostile(target):
+		return
+	_set_current_target(target, confidence)
 
 
 func notify_attacked_by(attacker: Node) -> void:
@@ -343,7 +358,8 @@ func _get_follow_destination() -> Vector2:
 
 
 func _move_toward(destination: Vector2, speed: float) -> void:
-	var offset: Vector2 = destination - owner_unit.global_position
+	var waypoint := _get_navigation_waypoint(destination)
+	var offset: Vector2 = waypoint - owner_unit.global_position
 	if offset.length() <= 8.0:
 		_stop()
 		return
@@ -356,6 +372,15 @@ func _move_toward(destination: Vector2, speed: float) -> void:
 		owner_unit.set_facing_direction(direction)
 	else:
 		owner_unit.set("facing", direction)
+
+
+func _get_navigation_waypoint(destination: Vector2) -> Vector2:
+	if navigation == null or not navigation.has_method("find_path"):
+		return destination
+	var path: PackedVector2Array = navigation.find_path(owner_unit.global_position, destination)
+	if path.is_empty():
+		return destination
+	return path[0]
 
 
 func _stop() -> void:
@@ -399,6 +424,10 @@ func _should_take_cover() -> bool:
 
 
 func _find_cover_position(target: Node2D) -> Vector2:
+	var navigation_cover: Variant = _find_navigation_cover_position(target)
+	if navigation_cover != null:
+		return navigation_cover
+
 	var best_position: Vector2 = owner_unit.global_position
 	var best_score: float = -INF
 	for radius in _get_cover_radii():
@@ -416,6 +445,18 @@ func _find_cover_position(target: Node2D) -> Vector2:
 			away = Vector2.RIGHT
 		return owner_unit.global_position + away.normalized() * cover_search_radius
 	return best_position
+
+
+func _find_navigation_cover_position(target: Node2D):
+	if navigation == null or not navigation.has_method("find_cover"):
+		return null
+	var cover: Dictionary = navigation.find_cover(owner_unit.global_position, target.global_position, cover_search_radius, faction)
+	if cover.is_empty() or not cover.has("position"):
+		return null
+	var position: Vector2 = cover.get("position", owner_unit.global_position)
+	if _is_cover_candidate_occupied(position):
+		return null
+	return position
 
 
 func _get_cover_directions() -> Array:
@@ -519,7 +560,7 @@ func _is_cover_candidate_occupied(candidate: Vector2) -> bool:
 	return false
 
 
-func _is_valid_target(target: Node) -> bool:
+func _is_valid_target(target) -> bool:
 	if target == null or not is_instance_valid(target):
 		return false
 	if not (target is Node2D):
@@ -570,12 +611,18 @@ func _get_owner_weapon_range(property_name: String, fallback: float) -> float:
 	if owner_unit == null:
 		return fallback
 	var gun = owner_unit.get("gun")
-	if gun == null:
-		return fallback
-	var value = gun.get(property_name)
-	if value == null:
-		return fallback
-	return float(value)
+	if gun != null:
+		var value = gun.get(property_name)
+		if value != null:
+			return float(value)
+	var melee_weapon = owner_unit.get("melee_weapon")
+	if melee_weapon != null:
+		var melee_range = melee_weapon.get("range")
+		if melee_range != null:
+			if property_name == "preferred_range":
+				return max(12.0, float(melee_range) * 0.72)
+			return float(melee_range)
+	return fallback
 
 
 func _get_gun():

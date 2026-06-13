@@ -24,15 +24,21 @@ var market_list: GridContainer
 var market_quantity_inputs: Dictionary = {}
 var market_mode := "buy"
 var orders_list: GridContainer
+var order_details_dialog: AcceptDialog
 var orders_refresh_timer := 0.0
+var hire_list: GridContainer
+var hire_status_label: Label
+var hire_message := ""
 var raid_status_label: Label
+var game_state
 
 func _ready() -> void:
 	visible = false
+	game_state = get_node("/root/GameState")
 	_build_ui()
-	GameState.state_changed.connect(_refresh_bank)
-	GameState.state_changed.connect(_refresh_market)
-	GameState.state_changed.connect(_refresh_current_base_app)
+	game_state.state_changed.connect(_refresh_bank)
+	game_state.state_changed.connect(_refresh_market)
+	game_state.state_changed.connect(_refresh_current_base_app)
 	set_process(false)
 
 
@@ -123,6 +129,7 @@ func _build_ui() -> void:
 	_add_app_button(app_bar, "Bank", "bank")
 	_add_app_button(app_bar, "Market", "market")
 	_add_app_button(app_bar, "Orders", "orders")
+	_add_app_button(app_bar, "Hire", "hire")
 
 	app_content = VBoxContainer.new()
 	app_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -149,6 +156,8 @@ func _show_app(app_id: String) -> void:
 	market_quantity_inputs.clear()
 	orders_list = null
 	orders_refresh_timer = 0.0
+	hire_list = null
+	hire_status_label = null
 	raid_status_label = null
 	for child in app_content.get_children():
 		child.queue_free()
@@ -168,6 +177,8 @@ func _show_app(app_id: String) -> void:
 			_build_market_app()
 		"orders":
 			_build_orders_app()
+		"hire":
+			_build_hire_app()
 		_:
 			_build_home_app()
 
@@ -190,10 +201,18 @@ func _build_messages_app() -> void:
 
 func _build_base_app() -> void:
 	title_label.text = "Base"
-	var summary: Dictionary = GameState.get_base_summary()
-	_add_info_label("%s\nTier: %s\nInventory: %d/%d KG\nWeekly: +$%d benefits, -$%d payroll, net $%d\nNext: %s" % [
+	var summary: Dictionary = game_state.get_base_summary()
+	var role_counts: Dictionary = summary.get("role_counts", {})
+	var role_limits: Dictionary = summary.get("role_limits", {})
+	_add_info_label("%s\nTier: %s\nCrew: T %d/%d, M %d/%d, P %d/%d\nInventory: %d/%d KG\nWeekly: +$%d benefits, -$%d payroll, net $%d\nNext: %s" % [
 		str(summary.get("name", "No Base")),
 		str(summary.get("tier", "none")).capitalize(),
+		int(role_counts.get("transporter", 0)),
+		int(role_limits.get("transporter", 0)),
+		int(role_counts.get("muscle", 0)),
+		int(role_limits.get("muscle", 0)),
+		int(role_counts.get("production", 0)),
+		int(role_limits.get("production", 0)),
 		int(summary.get("storage_used", 0)),
 		int(summary.get("storage_capacity", 0)),
 		int(summary.get("weekly_income", 0)),
@@ -212,7 +231,7 @@ func _build_base_app() -> void:
 	list.add_theme_constant_override("separation", 8)
 	scroll.add_child(list)
 
-	for room in GameState.get_base_rooms():
+	for room in game_state.get_base_rooms():
 		if not (room is Dictionary):
 			continue
 		var room_label := Label.new()
@@ -225,7 +244,7 @@ func _build_base_app() -> void:
 		list.add_child(room_label)
 
 		for slot_id in room.get("slot_ids", []):
-			var facility: Dictionary = GameState.get_owned_facility_for_slot(str(slot_id))
+			var facility: Dictionary = game_state.get_owned_facility_for_slot(str(slot_id))
 			if facility.is_empty():
 				continue
 			var facility_label := Label.new()
@@ -239,7 +258,7 @@ func _build_base_app() -> void:
 
 func _build_crew_app() -> void:
 	title_label.text = "Crew"
-	var roster: Array = GameState.get_crew_roster()
+	var roster: Array = game_state.get_crew_roster()
 	if roster.is_empty():
 		_add_info_label("No crew hired.", 18)
 		return
@@ -249,7 +268,10 @@ func _build_crew_app() -> void:
 			continue
 		_add_info_label("%s\n%s | %s | Health %d | $%d/week\nCan: %s\nTask: %s" % [
 			str(crew_member.get("name", "Crew")),
-			str(crew_member.get("job", "Runner")),
+			"%s %s" % [
+				str(crew_member.get("archetype_name", crew_member.get("job", "Hireling"))),
+				str(crew_member.get("role_name", "Crew")),
+			],
 			str(crew_member.get("status", "Ready")),
 			int(crew_member.get("health", 0)),
 			int(crew_member.get("upkeep", 0)),
@@ -258,9 +280,55 @@ func _build_crew_app() -> void:
 		], 17)
 
 
+func _build_hire_app() -> void:
+	title_label.text = "Hire"
+	var summary: Dictionary = game_state.get_base_summary()
+	var role_counts: Dictionary = summary.get("role_counts", {})
+	var role_limits: Dictionary = summary.get("role_limits", {})
+
+	var summary_row := HBoxContainer.new()
+	summary_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	summary_row.add_theme_constant_override("separation", 10)
+	app_content.add_child(summary_row)
+	_add_market_stat(summary_row, "Cash", "$%d" % game_state.cash)
+	_add_market_stat(summary_row, "Transporters", "%d/%d" % [int(role_counts.get("transporter", 0)), int(role_limits.get("transporter", 0))])
+	_add_market_stat(summary_row, "Muscle", "%d/%d" % [int(role_counts.get("muscle", 0)), int(role_limits.get("muscle", 0))])
+	_add_market_stat(summary_row, "Production", "%d/%d" % [int(role_counts.get("production", 0)), int(role_limits.get("production", 0))])
+
+	if hire_message != "":
+		hire_status_label = _add_info_label(hire_message, 16)
+		hire_status_label.modulate = PHONE_TEXT_MUTED
+
+	var hire_panel := PanelContainer.new()
+	hire_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hire_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hire_panel.add_theme_stylebox_override("panel", _make_panel_style(PHONE_PANEL_BG, PHONE_PANEL_BORDER, 1, 0))
+	app_content.add_child(hire_panel)
+
+	var panel_margin := MarginContainer.new()
+	panel_margin.add_theme_constant_override("margin_left", 14)
+	panel_margin.add_theme_constant_override("margin_top", 12)
+	panel_margin.add_theme_constant_override("margin_right", 14)
+	panel_margin.add_theme_constant_override("margin_bottom", 12)
+	hire_panel.add_child(panel_margin)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel_margin.add_child(scroll)
+
+	hire_list = GridContainer.new()
+	hire_list.columns = 5
+	hire_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hire_list.add_theme_constant_override("h_separation", 12)
+	hire_list.add_theme_constant_override("v_separation", 8)
+	scroll.add_child(hire_list)
+	_refresh_hires()
+
+
 func _build_raids_app() -> void:
 	title_label.text = "Raids"
-	var active_raid: Dictionary = GameState.get_active_raid_target()
+	var active_raid: Dictionary = game_state.get_active_raid_target()
 	if not active_raid.is_empty():
 		raid_status_label = Label.new()
 		raid_status_label.text = "Active raid: %s" % str(active_raid.get("name", "Raid"))
@@ -273,13 +341,13 @@ func _build_raids_app() -> void:
 		app_content.add_child(return_button)
 		return
 
-	var targets: Array = GameState.get_raid_targets()
+	var targets: Array = game_state.get_raid_targets()
 	if targets.is_empty():
 		_add_info_label("No raid targets available.", 18)
 		return
 
 	raid_status_label = Label.new()
-	raid_status_label.text = "Ready crew: %d" % GameState.get_ready_crew_count()
+	raid_status_label.text = "Ready crew: %d" % game_state.get_ready_crew_count()
 	raid_status_label.add_theme_font_size_override("font_size", 17)
 	app_content.add_child(raid_status_label)
 
@@ -348,11 +416,11 @@ func _build_market_app() -> void:
 	summary_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	summary_row.add_theme_constant_override("separation", 10)
 	app_content.add_child(summary_row)
-	_add_market_stat(summary_row, "Cash", "$%d" % GameState.cash)
-	_add_market_stat(summary_row, "Storage", "%d/%d KG" % [GameState.get_storage_used(), GameState.get_storage_capacity()])
-	_add_market_stat(summary_row, "Runner", "%d ready" % GameState.get_ready_crew_count())
-	_add_market_stat(summary_row, "Active Orders", "%d" % GameState.get_trade_orders().size())
-	_add_market_stat(summary_row, "In Flight", "%d" % GameState.get_trade_trips().size())
+	_add_market_stat(summary_row, "Cash", "$%d" % game_state.cash)
+	_add_market_stat(summary_row, "Storage", "%d/%d KG" % [game_state.get_storage_used(), game_state.get_storage_capacity()])
+	_add_market_stat(summary_row, "Transporters", "%d ready" % game_state.get_ready_crew_count("transporter"))
+	_add_market_stat(summary_row, "Active Orders", "%d" % game_state.get_trade_orders().size())
+	_add_market_stat(summary_row, "In Flight", "%d" % game_state.get_trade_trips().size())
 
 	var controls_row := HBoxContainer.new()
 	controls_row.add_theme_constant_override("separation", 12)
@@ -411,7 +479,7 @@ func _build_market_app() -> void:
 	panel_margin.add_child(scroll)
 
 	market_list = GridContainer.new()
-	market_list.columns = 8
+	market_list.columns = 9
 	market_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	market_list.add_theme_constant_override("h_separation", 12)
 	market_list.add_theme_constant_override("v_separation", 8)
@@ -421,7 +489,7 @@ func _build_market_app() -> void:
 
 func _build_orders_app() -> void:
 	title_label.text = "Orders"
-	var order_rows: Array = GameState.get_trade_order_rows()
+	var order_rows: Array = game_state.get_trade_order_rows()
 	var holding_weight: int = 0
 	var queued_count: int = 0
 	for row in order_rows:
@@ -435,8 +503,8 @@ func _build_orders_app() -> void:
 	summary_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	summary_row.add_theme_constant_override("separation", 10)
 	app_content.add_child(summary_row)
-	_add_market_stat(summary_row, "Active Orders", "%d" % GameState.get_trade_orders().size())
-	_add_market_stat(summary_row, "In Flight", "%d" % GameState.get_trade_trips().size())
+	_add_market_stat(summary_row, "Active Orders", "%d" % game_state.get_trade_orders().size())
+	_add_market_stat(summary_row, "In Flight", "%d" % game_state.get_trade_trips().size())
 	_add_market_stat(summary_row, "Queued", "%d" % queued_count)
 	_add_market_stat(summary_row, "Holding", "%d KG" % holding_weight)
 
@@ -459,7 +527,7 @@ func _build_orders_app() -> void:
 	panel_margin.add_child(scroll)
 
 	orders_list = GridContainer.new()
-	orders_list.columns = 8
+	orders_list.columns = 9
 	orders_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	orders_list.add_theme_constant_override("h_separation", 12)
 	orders_list.add_theme_constant_override("v_separation", 8)
@@ -472,16 +540,16 @@ func _refresh_bank() -> void:
 		return
 
 	bank_label.text = "Cash: $%d\nHeat: %d%%\nStorage: %d/%d KG\nActive orders: %d\nBenefits: +$%d/week\nPayroll: -$%d/week\nNet: $%d/week\nBuy: $%d\nSell: $%d" % [
-		GameState.cash,
-		GameState.heat,
-		GameState.get_storage_used(),
-		GameState.get_storage_capacity(),
-		GameState.get_trade_orders().size(),
-		GameState.get_weekly_income_total(),
-		GameState.get_weekly_payroll_total(),
-		GameState.get_weekly_net_income(),
-		GameState.get_current_buy_price(),
-		GameState.get_current_sell_price(),
+		game_state.cash,
+		game_state.heat,
+		game_state.get_storage_used(),
+		game_state.get_storage_capacity(),
+		game_state.get_trade_orders().size(),
+		game_state.get_weekly_income_total(),
+		game_state.get_weekly_payroll_total(),
+		game_state.get_weekly_net_income(),
+		game_state.get_current_buy_price(),
+		game_state.get_current_sell_price(),
 	]
 
 
@@ -495,7 +563,8 @@ func _refresh_market() -> void:
 		child.queue_free()
 	market_quantity_inputs.clear()
 
-	_add_market_grid_header("Product", 220.0)
+	_add_market_grid_header("Product", 180.0)
+	_add_market_grid_header("Legality", 100.0)
 	_add_market_grid_header("%s Price" % market_mode.capitalize(), 90.0)
 	_add_market_grid_header("Weight", 90.0)
 	_add_market_grid_header("Distance", 110.0)
@@ -504,7 +573,7 @@ func _refresh_market() -> void:
 	_add_market_grid_header("Qty", 90.0)
 	_add_market_grid_header("Action", 130.0)
 
-	for item in GameState.get_available_trade_goods():
+	for item in game_state.get_available_trade_goods():
 		_add_trade_row(item)
 
 
@@ -515,7 +584,7 @@ func _refresh_orders() -> void:
 	for child in orders_list.get_children():
 		child.queue_free()
 
-	var order_rows: Array = GameState.get_trade_order_rows()
+	var order_rows: Array = game_state.get_trade_order_rows()
 	if order_rows.is_empty():
 		orders_list.columns = 1
 		var empty_label := Label.new()
@@ -525,19 +594,49 @@ func _refresh_orders() -> void:
 		orders_list.add_child(empty_label)
 		return
 
-	orders_list.columns = 8
+	orders_list.columns = 9
 	_add_order_grid_header("Flow", 90.0)
 	_add_order_grid_header("Product", 160.0)
 	_add_order_grid_header("Status", 160.0)
 	_add_order_grid_header("Qty", 90.0)
 	_add_order_grid_header("Holding", 110.0)
-	_add_order_grid_header("Runner", 120.0)
+	_add_order_grid_header("Transporter", 120.0)
 	_add_order_grid_header("ETA", 95.0)
 	_add_order_grid_header("Risk", 80.0)
+	_add_order_grid_header("Details", 100.0)
 
 	for row in order_rows:
 		if row is Dictionary:
 			_add_order_row(row)
+
+
+func _refresh_hires() -> void:
+	if hire_list == null:
+		return
+
+	for child in hire_list.get_children():
+		child.queue_free()
+
+	var hires: Array = game_state.get_available_hires()
+	if hires.is_empty():
+		hire_list.columns = 1
+		var empty_label := Label.new()
+		empty_label.text = "No one is looking for work right now."
+		empty_label.add_theme_font_size_override("font_size", 17)
+		empty_label.modulate = PHONE_TEXT_MUTED
+		hire_list.add_child(empty_label)
+		return
+
+	hire_list.columns = 5
+	_add_hire_grid_header("Name", 170.0)
+	_add_hire_grid_header("Price", 90.0)
+	_add_hire_grid_header("Job", 150.0)
+	_add_hire_grid_header("Role", 120.0)
+	_add_hire_grid_header("Buy", 110.0)
+
+	for candidate in hires:
+		if candidate is Dictionary:
+			_add_hire_row(candidate)
 
 
 func _add_order_row(row: Dictionary) -> void:
@@ -552,6 +651,105 @@ func _add_order_row(row: Dictionary) -> void:
 	_add_order_grid_cell(str(row.get("runner", "Waiting")), 120.0)
 	_add_order_grid_cell(str(row.get("eta_label", "Queued")), 95.0)
 	_add_order_grid_cell(str(row.get("risk_label", "Low")), 80.0)
+	var details_button := Button.new()
+	details_button.text = "Details"
+	details_button.custom_minimum_size = Vector2(100.0, 44.0)
+	details_button.focus_mode = Control.FOCUS_NONE
+	details_button.tooltip_text = "Show order details"
+	details_button.pressed.connect(_show_order_details.bind(row.duplicate(true)))
+	orders_list.add_child(details_button)
+
+
+func _show_order_details(row: Dictionary) -> void:
+	if order_details_dialog == null:
+		order_details_dialog = AcceptDialog.new()
+		order_details_dialog.title = "Order Details"
+		order_details_dialog.min_size = Vector2i(440, 0)
+		add_child(order_details_dialog)
+	order_details_dialog.dialog_text = _format_order_details(row)
+	order_details_dialog.popup_centered(Vector2i(480, 380))
+
+
+func _format_order_details(row: Dictionary) -> String:
+	var lines := PackedStringArray()
+	lines.append("%s %s" % [
+		str(row.get("direction", "Order")),
+		str(row.get("good_name", "Product")),
+	])
+	lines.append("Status: %s" % str(row.get("status", "Queued")))
+	lines.append("Goods: %d units, %d KG total load" % [
+		int(row.get("quantity", 0)),
+		int(row.get("load_weight_kg", 0)),
+	])
+	lines.append("Unit weight: %d KG" % int(row.get("unit_weight_kg", 0)))
+	lines.append("Holding now: %d KG" % int(row.get("holding_weight_kg", 0)))
+	lines.append("Transporter: %s" % str(row.get("runner", "Waiting")))
+	lines.append("ETA: %s" % str(row.get("eta_label", "Queued")))
+	lines.append("Risk: %s" % str(row.get("risk_label", "Low")))
+	lines.append("Legality: %s" % str(row.get("legality_label", "Unknown")))
+	lines.append("Unit price: $%d" % int(row.get("unit_price", 0)))
+	lines.append("Value: $%d" % int(row.get("value", 0)))
+
+	var order_id := str(row.get("order_id", row.get("id", "")))
+	if order_id != "":
+		lines.append("Order ID: %s" % order_id)
+	var trip_id := str(row.get("trip_id", ""))
+	if trip_id != "":
+		lines.append("Trip ID: %s" % trip_id)
+	var market_id := str(row.get("market_id", ""))
+	if market_id != "":
+		lines.append("Market: %s" % market_id.capitalize().replace("_", " "))
+	var phase := str(row.get("phase", ""))
+	if phase != "":
+		lines.append("Phase: %s" % phase.capitalize().replace("_", " "))
+	if row.has("picked_up"):
+		lines.append("Picked up: %s" % ("Yes" if bool(row.get("picked_up", false)) else "No"))
+	if str(row.get("row_type", "")) == "order":
+		lines.append("Progress: %d pending, %d in flight, %d complete of %d" % [
+			int(row.get("pending_quantity", 0)),
+			int(row.get("in_flight_quantity", 0)),
+			int(row.get("completed_quantity", 0)),
+			int(row.get("total_quantity", 0)),
+		])
+	return "\n".join(lines)
+
+
+func _add_hire_row(candidate: Dictionary) -> void:
+	_add_hire_grid_cell(str(candidate.get("name", "Unknown")), 170.0, true)
+	_add_hire_grid_cell("$%d" % int(candidate.get("price", 0)), 90.0)
+	_add_hire_grid_cell(str(candidate.get("job", "Hireling")), 150.0)
+	_add_hire_grid_cell(str(candidate.get("role_name", "Crew")), 120.0)
+	var hire_button := Button.new()
+	hire_button.text = "Buy"
+	hire_button.custom_minimum_size = Vector2(110.0, 44.0)
+	hire_button.focus_mode = Control.FOCUS_NONE
+	hire_button.disabled = not bool(candidate.get("can_hire", false))
+	hire_button.tooltip_text = str(candidate.get("block_reason", "")) if hire_button.disabled else "Hire %s" % str(candidate.get("name", "candidate"))
+	hire_button.pressed.connect(_on_hire_pressed.bind(str(candidate.get("id", ""))))
+	hire_list.add_child(hire_button)
+
+
+func _add_hire_grid_header(text: String, width: float) -> void:
+	var label := Label.new()
+	label.text = text
+	label.custom_minimum_size = Vector2(width, 28.0)
+	label.add_theme_font_size_override("font_size", 14)
+	label.modulate = PHONE_TEXT_MUTED
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hire_list.add_child(label)
+
+
+func _add_hire_grid_cell(text: String, width: float, primary: bool = false) -> void:
+	var label := Label.new()
+	label.text = text
+	label.custom_minimum_size = Vector2(width, 44.0)
+	label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.add_theme_font_size_override("font_size", 16 if primary else 15)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	if not primary:
+		label.modulate = Color(0.88, 0.92, 0.88, 1.0)
+	hire_list.add_child(label)
 
 
 func _add_order_grid_header(text: String, width: float) -> void:
@@ -615,7 +813,8 @@ func _add_trade_row(item: Dictionary) -> void:
 	var good_id := str(item.get("id", ""))
 	var price: int = int(item.get("buy_price", 0)) if market_mode == "buy" else int(item.get("sell_price", 0))
 	var unit_weight: int = int(item.get("unit_weight_kg", 1))
-	_add_market_grid_cell("%s\n%s" % [str(item.get("name", "Product")), "Legal" if bool(item.get("legal", false)) else "Restricted"], 220.0, true)
+	_add_market_grid_cell(str(item.get("name", "Product")), 180.0, true)
+	_add_market_grid_cell(str(item.get("legality_label", "Unknown")), 100.0)
 	_add_market_grid_cell("$%d" % price, 90.0)
 	_add_market_grid_cell("%d KG/unit" % unit_weight, 90.0)
 	_add_market_grid_cell(str(item.get("distance_label", "Local")), 110.0)
@@ -653,7 +852,7 @@ func _is_trade_row_disabled(item: Dictionary) -> bool:
 	if market_mode == "sell":
 		return int(item.get("available_sell_inventory", 0)) <= 0
 	var remote_inventory: int = int(item.get("remote_inventory", 0))
-	return remote_inventory != GameState.TRADE_SOURCE_INFINITE and remote_inventory <= 0
+	return remote_inventory != game_state.TRADE_SOURCE_INFINITE and remote_inventory <= 0
 
 
 func _on_market_mode_pressed(new_mode: String) -> void:
@@ -753,14 +952,20 @@ func _make_panel_style(bg_color: Color, border_color: Color, border_width: int =
 func _refresh_current_base_app() -> void:
 	if not visible:
 		return
-	if ["base", "crew", "raids", "market", "orders"].has(current_app):
+	if ["base", "crew", "raids", "market", "orders", "hire"].has(current_app):
 		_show_app(current_app)
 
 
+func _on_hire_pressed(candidate_id: String) -> void:
+	var result: Dictionary = game_state.hire_employee(candidate_id)
+	hire_message = str(result.get("message", "Hire updated."))
+	_show_app("hire")
+
+
 func _on_send_raid_pressed(target_id: String) -> void:
-	var result: Dictionary = GameState.start_raid(target_id, false)
+	var result: Dictionary = game_state.start_raid(target_id, false)
 	if bool(result.get("ok", false)):
-		result = GameState.complete_active_raid(true)
+		result = game_state.complete_active_raid(true)
 	if raid_status_label != null:
 		raid_status_label.text = str(result.get("message", "Raid order updated."))
 
@@ -780,7 +985,7 @@ func _format_assignment(crew_member: Dictionary) -> String:
 	var assigned_task := str(crew_member.get("assigned_task", ""))
 	if assigned_task == "":
 		return "Unassigned"
-	for task in GameState.get_transport_tasks():
+	for task in game_state.get_transport_tasks():
 		if task is Dictionary and str(task.get("id", "")) == assigned_task:
 			return str(task.get("name", assigned_task))
 	return assigned_task.capitalize().replace("_", " ")

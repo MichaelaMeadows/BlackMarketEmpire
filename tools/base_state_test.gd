@@ -13,6 +13,7 @@ func _init() -> void:
 	_state._ready()
 	_test_base_state_initializes_from_map()
 	_test_raid_readiness_uses_base_crew()
+	_test_hiring_pool()
 	_test_runner_trade_orders()
 
 	if _failures == 0:
@@ -33,6 +34,20 @@ func _test_base_state_initializes_from_map() -> void:
 	_expect(summary.get("tier") == "house", "base tier initializes")
 	_expect(int(summary.get("room_count", 0)) == 5, "base room count initializes")
 	_expect(int(summary.get("facility_count", 0)) == 5, "base facilities initialize")
+	_expect(_state.get_base_role_limit("transporter") == 5, "starter base allows five transporters")
+	_expect(_state.get_base_role_limit("muscle") == 3, "starter base allows three muscle")
+	_expect(_state.get_base_role_limit("production") == 0, "starter base starts with no producer slots")
+	_expect(_state.can_base_accept_role("transporter"), "starter base has room for more transporters")
+	_expect(_state.can_base_accept_role("muscle"), "starter base has room for muscle")
+	_expect(not _state.can_base_accept_role("production"), "starter base cannot hire producers yet")
+	var role_limits: Dictionary = summary.get("role_limits", {})
+	var role_counts: Dictionary = summary.get("role_counts", {})
+	_expect(int(role_limits.get("transporter", 0)) == 5, "base summary exposes transporter limit")
+	_expect(int(role_limits.get("muscle", 0)) == 3, "base summary exposes muscle limit")
+	_expect(int(role_limits.get("production", -1)) == 0, "base summary exposes producer limit")
+	_expect(int(role_counts.get("transporter", 0)) == 1, "base summary counts one transporter")
+	_expect(int(role_counts.get("muscle", -1)) == 0, "base summary counts no muscle")
+	_expect(int(role_counts.get("production", -1)) == 0, "base summary counts no producers")
 	_expect(_state.cash == 100, "starting cash is $100")
 	_expect(_state.get_stock() == 0, "base starts without stored product")
 	_expect(_state.get_storage_capacity() == 20, "starter base stores 20 KG")
@@ -49,8 +64,14 @@ func _test_raid_readiness_uses_base_crew() -> void:
 	var roster: Array = _state.get_crew_roster()
 	_expect(roster.size() == 1, "starter house initializes one crew member")
 	_expect(roster[0].get("name") == "Benji", "starter employee is Benji")
-	_expect(roster[0].get("job") == "Runner", "Benji is a runner")
+	_expect(roster[0].get("role") == "transporter", "Benji is a transporter")
+	_expect(roster[0].get("role_name") == "Transporter", "Benji exposes a role label")
+	_expect(roster[0].get("archetype") == "dealer", "Benji is a dealer transporter")
+	_expect(roster[0].get("job") == "Dealer", "Benji keeps a legacy job label")
+	_expect(int(roster[0].get("carry_capacity_kg", 0)) == 5, "dealer transporter carries 5 KG")
 	_expect(_state.get_ready_crew_count() == 1, "starter crew is ready")
+	_expect(_state.get_ready_crew_count("transporter") == 1, "starter transporter is ready")
+	_expect(_state.get_ready_crew_count("muscle") == 0, "starter crew has no muscle")
 	var task_result: Dictionary = _state.assign_crew_to_transport_task("benji_runner", "corner_pickup")
 	_expect(bool(task_result.get("ok", false)), "Benji can be assigned to transport tasks")
 	_state.clear_crew_assignment("benji_runner")
@@ -67,7 +88,61 @@ func _test_raid_readiness_uses_base_crew() -> void:
 	result = _state.start_raid("abandoned_depot", false)
 	_expect(not bool(result.get("ok", false)), "dead crew member cannot satisfy raid crew requirement")
 	var buy_result: Dictionary = _state.place_buy_order(1)
-	_expect(not bool(buy_result.get("ok", false)), "dead runner cannot take trade orders")
+	_expect(not bool(buy_result.get("ok", false)), "dead transporter cannot take trade orders")
+
+
+func _test_hiring_pool() -> void:
+	var state = GAME_STATE_SCRIPT.new()
+	state._ready()
+	var map_loader = MAP_LOADER_SCRIPT.new()
+	get_root().add_child(map_loader)
+	_expect(map_loader.load_map(MAP_PATH), "starter house map loads for hiring")
+	state.initialize_base_from_map(map_loader.get_map_data())
+
+	var hires: Array = state.get_available_hires()
+	_expect(hires.size() == 2, "starter hiring pool starts with two candidates")
+	_expect(str(hires[0].get("archetype", "")) == "thug", "first starter hire is a thug")
+	_expect(str(hires[1].get("archetype", "")) == "thug", "second starter hire is a thug")
+	_expect(str(hires[0].get("name", "")) != "", "hire candidate exposes a name")
+	_expect(int(hires[0].get("price", 0)) > 0, "hire candidate exposes a price")
+	_expect(str(hires[0].get("job", "")) != "", "hire candidate exposes a job")
+	_expect(str(hires[0].get("role", "")) != "", "hire candidate exposes a role")
+	_expect(bool(hires[0].get("can_hire", false)), "affordable starter candidate can be hired")
+	_expect(bool(hires[1].get("can_hire", false)), "second starter thug is also affordable")
+	_expect(not bool(hires[0].get("ranged_weapon", true)), "thug candidate has no ranged weapon")
+	_expect(hires[0].get("weapon") == null, "thug candidate weapon slot is empty")
+	var candidate_melee: Variant = hires[0].get("melee_weapon", {})
+	_expect(candidate_melee is Dictionary, "thug candidate starts with melee weapon data")
+
+	var cash_before_hire: int = state.cash
+	var roster_size_before_hire: int = state.get_crew_roster().size()
+	var hire_price: int = int(hires[0].get("price", 0))
+	var hire_result: Dictionary = state.hire_employee(str(hires[0].get("id", "")))
+	_expect(bool(hire_result.get("ok", false)), "candidate can be hired")
+	_expect(state.cash == cash_before_hire - hire_price, "hiring spends candidate price")
+	_expect(state.get_crew_roster().size() == roster_size_before_hire + 1, "hiring adds a crew member")
+	var hired_member: Dictionary = hire_result.get("crew_member", {})
+	var hired_id := str(hired_member.get("id", ""))
+	_expect(hired_id.begins_with("hireling_"), "hired crew receives a persistent crew id")
+	_expect(str(hired_member.get("faction", "")) == "player_crew", "hired crew is marked as player crew")
+	_expect(str(hired_member.get("archetype", "")) == "thug", "hired starter crew is a thug")
+	_expect(not bool(hired_member.get("ranged_weapon", true)), "hired thug has no ranged weapon")
+	_expect(hired_member.get("weapon") == null, "hired thug has no ranged weapon data")
+	var hired_melee: Dictionary = hired_member.get("melee_weapon", {})
+	_expect(str(hired_melee.get("weapon_type", "")) == "bat", "hired thug starts with a bat")
+	var remaining_hires: Array = state.get_available_hires()
+	var second_candidate: Dictionary = remaining_hires[0]
+	var second_hire: Dictionary = state.hire_employee(str(second_candidate.get("id", "")))
+	_expect(bool(second_hire.get("ok", false)), "can buy two starter thugs with starting cash")
+	_expect(state.get_ready_crew_count("muscle") == 2, "two hired thugs count as ready muscle")
+	state.initialize_base_from_map(map_loader.get_map_data())
+	_expect(_has_crew_member(state.get_crew_roster(), hired_id), "same base reload preserves hired crew")
+	_expect(state.get_available_hires().size() == 0, "hiring both starter thugs empties the pool")
+	state.advance_market(2)
+	_expect(state.get_available_hires().size() == 0, "hiring pool does not refill before cadence")
+	state.advance_market(1)
+	_expect(state.get_available_hires().size() == 1, "hiring pool gains a candidate after cadence")
+	map_loader.free()
 
 
 func _test_runner_trade_orders() -> void:
@@ -79,7 +154,10 @@ func _test_runner_trade_orders() -> void:
 	state.initialize_base_from_map(map_loader.get_map_data())
 	var trade_goods: Array = state.get_available_trade_goods()
 	_expect(trade_goods.size() == 1, "early market exposes one trade good")
-	_expect(trade_goods[0].get("id") == "fast_food", "early market starts with legal fast-food")
+	_expect(trade_goods[0].get("id") == "fast_food", "early market starts with fast food")
+	_expect(trade_goods[0].get("name") == "Fast Food", "fast food name omits legality")
+	_expect(trade_goods[0].get("legality") == "legal", "fast food legality is legal")
+	_expect(trade_goods[0].get("legality_label") == "Legal", "fast food exposes a legality label")
 	_expect(int(trade_goods[0].get("buy_price", 0)) < int(trade_goods[0].get("sell_price", 0)), "fast-food has a profitable buy/sell spread")
 	_expect(int(trade_goods[0].get("unit_weight_kg", 0)) == 2, "fast-food weighs 2 KG per unit")
 	_expect(trade_goods[0].get("remote_inventory_label") == "Infinite", "fast-food remote supply is infinite")
@@ -105,6 +183,11 @@ func _test_runner_trade_orders() -> void:
 	var buy_trip_row: Dictionary = _find_order_row(buy_order_rows, "trip", "Incoming")
 	_expect(not buy_queued_row.is_empty(), "buy order manifest includes queued remainder")
 	_expect(not buy_trip_row.is_empty(), "buy order manifest includes in-flight trip")
+	_expect(str(buy_queued_row.get("legality_label", "")) == "Legal", "queued order details expose legality")
+	_expect(int(buy_queued_row.get("unit_price", 0)) > 0, "queued order details expose unit price")
+	_expect(int(buy_queued_row.get("value", 0)) == buy_value, "queued order details expose total value")
+	_expect(str(buy_trip_row.get("order_id", "")) == str(buy_order.get("id", "")), "trip details keep parent order id")
+	_expect(str(buy_trip_row.get("trip_id", "")) == str(buy_trips[0].get("id", "")), "trip details expose trip id")
 	_expect(int(buy_trip_row.get("load_weight_kg", 0)) == int(buy_trips[0].get("quantity", 0)) * state.get_unit_weight_kg(), "buy trip manifest records load weight")
 	_expect(int(buy_trip_row.get("holding_weight_kg", -1)) == 0, "runner holds no buy goods while heading out")
 	state.update_trade_trip_progress(str(buy_trips[0].get("id", "")), "away_buy", 3.2)
@@ -137,6 +220,9 @@ func _test_runner_trade_orders() -> void:
 	var sell_trip_row: Dictionary = _find_order_row(sell_order_rows, "trip", "Outgoing")
 	_expect(not sell_queued_row.is_empty(), "sell order manifest includes queued remainder")
 	_expect(not sell_trip_row.is_empty(), "sell order manifest includes outgoing trip")
+	_expect(str(sell_trip_row.get("legality_label", "")) == "Legal", "sell trip details expose legality")
+	_expect(int(sell_trip_row.get("unit_price", 0)) > 0, "sell trip details expose unit price")
+	_expect(int(sell_trip_row.get("value", 0)) > 0, "sell trip details expose trip value")
 	_expect(str(sell_trip_row.get("risk_label", "")) == "Low", "trade manifest includes future risk field")
 	var complete_result: Dictionary = _complete_sell_trips(state, sell_trips)
 	_expect(bool(complete_result.get("ok", false)), "queued sell trips complete when runner returns")
@@ -183,6 +269,13 @@ func _complete_sell_trips(state, trips: Array) -> Dictionary:
 			return result
 		pending_trips.append_array(result.get("trips", []))
 	return result
+
+
+func _has_crew_member(roster: Array, crew_id: String) -> bool:
+	for crew_member in roster:
+		if crew_member is Dictionary and str(crew_member.get("id", "")) == crew_id:
+			return true
+	return false
 
 
 func _expect(condition: bool, label: String) -> void:

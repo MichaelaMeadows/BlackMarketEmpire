@@ -5,6 +5,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$logDir = Join-Path $PSScriptRoot ".godot_logs"
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $testScripts = Get-ChildItem -Path $PSScriptRoot -File -Filter "*test.gd" |
     Where-Object { $_.Name -notlike "*helper*" } |
     Sort-Object Name
@@ -18,9 +20,10 @@ Push-Location $repoRoot
 try {
     foreach ($script in $testScripts) {
         $relativePath = "tools/$($script.Name)"
+        $logPath = Join-Path $logDir "$($script.BaseName).log"
         Write-Host ""
         Write-Host "==> Running $relativePath"
-        & $GodotCommand --headless --script $relativePath
+        & $GodotCommand --headless --log-file $logPath --script $relativePath
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Test failed: $relativePath"
             exit $LASTEXITCODE

@@ -14,6 +14,7 @@ var faction := "neutral"
 var squad_id := ""
 var display_color := Color(0.70, 0.77, 0.82)
 var facing := Vector2.DOWN
+var ranged_weapon_enabled := true
 var health
 var gun
 var melee_weapon
@@ -39,7 +40,7 @@ func _ready() -> void:
 		health.health_changed.connect(_on_health_changed)
 		health.died.connect(_on_died)
 
-	if gun == null:
+	if ranged_weapon_enabled and gun == null:
 		gun = _instantiate_component_scene(GUN_COMPONENT_SCENE_PATH, ["setup", "try_fire", "is_reloading"])
 		if gun == null:
 			return
@@ -66,6 +67,7 @@ func setup(npc_data: Dictionary) -> void:
 	npc_role = str(npc_data.get("role", npc_role))
 	faction = str(npc_data.get("faction", faction))
 	squad_id = str(npc_data.get("squad_id", squad_id))
+	ranged_weapon_enabled = _should_create_ranged_weapon(npc_data)
 	display_color = _read_color(npc_data.get("color", []), display_color)
 	if visual != null:
 		visual.setup(str(npc_data.get("visual_id", "npc_%s" % npc_role)), display_color, Color(0.88, 0.28, 0.22))
@@ -79,12 +81,14 @@ func setup(npc_data: Dictionary) -> void:
 		health.died.connect(_on_died)
 	health.setup(int(npc_data.get("health", 60)))
 
-	if gun == null:
+	if not ranged_weapon_enabled:
+		_remove_gun()
+	elif gun == null:
 		gun = _instantiate_component_scene(GUN_COMPONENT_SCENE_PATH, ["setup", "try_fire", "is_reloading"])
 		if gun == null:
 			return
 		add_child(gun)
-	if npc_data.has("weapon"):
+	if ranged_weapon_enabled and npc_data.has("weapon"):
 		gun.setup(npc_data["weapon"])
 
 	if npc_data.has("melee_weapon"):
@@ -191,6 +195,22 @@ func _read_color(value: Variant, fallback: Color) -> Color:
 		var alpha: float = float(value[3]) if value.size() >= 4 else 1.0
 		return Color(float(value[0]), float(value[1]), float(value[2]), alpha)
 	return fallback
+
+
+func _should_create_ranged_weapon(npc_data: Dictionary) -> bool:
+	if npc_data.has("ranged_weapon"):
+		return bool(npc_data.get("ranged_weapon", true))
+	if npc_data.has("weapon"):
+		return npc_data.get("weapon") is Dictionary
+	return true
+
+
+func _remove_gun() -> void:
+	if gun == null:
+		return
+	if is_instance_valid(gun):
+		gun.queue_free()
+	gun = null
 
 
 func _create_visual() -> void:
