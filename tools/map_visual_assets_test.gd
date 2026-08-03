@@ -1,6 +1,7 @@
 extends SceneTree
 
 const MAP_LOADER_SCRIPT := preload("res://scripts/map_loader.gd")
+const WORLD_ASSETS := preload("res://scripts/visuals/world_asset_catalog.gd")
 const STARTER_MAP_PATH := "res://maps/starter_house.json"
 
 var _failures: int = 0
@@ -10,6 +11,7 @@ func _init() -> void:
 	_test_starter_map_sprite_assets_resolve()
 	_test_starter_rooms_have_distinct_floor_materials()
 	_test_missing_sprite_uses_procedural_fallback()
+	_test_core_surface_tiles_resolve()
 
 	if _failures == 0:
 		print("Map visual asset tests passed.")
@@ -50,6 +52,24 @@ func _test_missing_sprite_uses_procedural_fallback() -> void:
 	map_loader.load_map(STARTER_MAP_PATH)
 	_expect(not map_loader._draw_sprite_item({"sprite_path": "res://assets/sprites/props/missing.png"}, Vector2.ZERO, 1.0), "missing sprite declines texture draw")
 	map_loader.free()
+
+
+func _test_core_surface_tiles_resolve() -> void:
+	var expected := {
+		"asphalt_road": "asphalt",
+		"concrete_path": "concrete",
+		"woods_grass": "grass",
+		"worn_wood": "wood",
+		"worn_carpet": "carpet",
+		"bath_tile": "ceramic",
+		"packed_dirt": "dirt",
+		"brick_wall": "brick",
+	}
+	for material in expected:
+		_expect(WORLD_ASSETS.get_surface_family(material) == expected[material], "%s maps to the expected tile family" % material)
+		var texture := WORLD_ASSETS.get_surface_texture(material)
+		_expect(texture != null, "%s resolves a surface texture" % material)
+		_expect(texture.get_size() == Vector2(32, 32), "%s surface texture is 32x32" % material)
 
 
 func _read_vector2(value: Variant) -> Vector2:

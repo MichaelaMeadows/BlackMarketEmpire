@@ -8,6 +8,7 @@ const MARKET_SIMULATION_SCRIPT = preload("res://scripts/market_simulation.gd")
 const PROGRESSION_TRACKER_SCRIPT = preload("res://scripts/progression_tracker.gd")
 const NPC_ROLE_CATALOG_SCRIPT = preload("res://scripts/npc_role_catalog.gd")
 const NAME_GENERATOR_SCRIPT = preload("res://scripts/name_generator.gd")
+const TRADE_STATE_SCRIPT = preload("res://scripts/trade_state.gd")
 const ECONOMY_DATA_PATH = "res://data/economy"
 const PROGRESSION_DATA_PATH = "res://data/progression/unlock_rules.json"
 const GOOD_KEY = "fast_food"
@@ -68,34 +69,7 @@ var storage_inventory: Dictionary = {
 	"fast_food": 0,
 }
 var storage_capacity: int = 0
-var trade_sources: Dictionary = {
-	"fast_food": {
-		"id": "burger_stop",
-		"name": "Fast Food",
-		"source_name": "Burger Stop",
-		"buy_price": 3,
-		"sell_price": 6,
-		"distance": 2,
-		"distance_label": "2 blocks",
-		"source_inventory": TRADE_SOURCE_INFINITE,
-		"unit_weight_kg": 2,
-		"legality": LEGALITY_LEGAL,
-		"unlocked": true,
-	},
-	"bootleg_media": {
-		"id": "corner_media_seller",
-		"name": "Bootleg Media",
-		"source_name": "Corner Media Seller",
-		"buy_price": 6,
-		"sell_price": 11,
-		"distance": 3,
-		"distance_label": "3 blocks",
-		"source_inventory": 36,
-		"unit_weight_kg": 1,
-		"legality": LEGALITY_ILLICIT,
-		"unlocked": false,
-	},
-}
+var trade_state = TRADE_STATE_SCRIPT.new()
 var weekly_income_sources: Array = [
 	{"id": "unemployment_benefits", "name": "Unemployment Benefits", "amount": UNEMPLOYMENT_BENEFITS_WEEKLY},
 ]
@@ -103,11 +77,6 @@ var transport_tasks: Array = [
 	{"id": "corner_pickup", "name": "Corner Pickup", "required_role": "transporter", "duration_days": 1, "reward": 8, "capacity_kg": 5},
 	{"id": "supply_drop", "name": "Supply Drop", "required_role": "transporter", "duration_days": 1, "reward": 10, "capacity_kg": 4},
 ]
-var active_trade_orders: Dictionary = {}
-var active_trade_trips: Dictionary = {}
-var reserved_sell_inventory: Dictionary = {}
-var next_trade_order_id: int = 1
-var next_trade_trip_id: int = 1
 var hire_candidates: Array = []
 var hire_candidates_initialized := false
 var hire_candidate_progress_days: int = 0
@@ -131,313 +100,74 @@ func _ready() -> void:
 
 
 func buy_from_supplier(quantity: int = 1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
-	_ensure_market()
-	if unit_price < 0:
-		unit_price = get_current_buy_price(good_id, active_market_id)
-	var total_cost: int = quantity * unit_price
-	if cash < total_cost:
-		return _result(false, "Not enough cash.")
-
-	var acquired: int = _take_remote_source_inventory(good_id, quantity)
-	if acquired < quantity:
-		_restore_remote_source_inventory(good_id, acquired)
-		return _result(false, "Local supply is tight.")
-
-	cash -= total_cost
-	inventory[good_id] = get_stock(good_id) + quantity
-	storage_inventory[good_id] = get_stock(good_id)
-	if not _is_trade_good_legal(good_id):
-		heat = min(100, heat + quantity)
-	_maybe_upgrade_scope()
-	state_changed.emit()
-	return _result(true, "Bought %d for $%d." % [quantity, total_cost])
+	var context := _trade_context()
+	return _complete_trade_action(context, trade_state.buy_from_supplier(context, quantity, unit_price, good_id), true)
 
 
 func sell_to_buyer(quantity: int = 1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
-	_ensure_market()
-	if get_stock(good_id) < quantity:
-		return _result(false, "No stock to move.")
-
-	if unit_price < 0:
-		unit_price = get_current_sell_price(good_id, active_market_id)
-	var total_sale: int = quantity * unit_price
-	inventory[good_id] = get_stock(good_id) - quantity
-	storage_inventory[good_id] = get_stock(good_id)
-	cash += total_sale
-	if not _is_trade_good_legal(good_id):
-		heat = min(100, heat + quantity * 2)
-	_restore_remote_source_inventory(good_id, quantity)
-	record_progression_event("sale", {
-		"item_id": good_id,
-		"quantity": quantity,
-		"value": total_sale,
-		"market_id": active_market_id,
-	})
-	_maybe_upgrade_scope()
-	state_changed.emit()
-	return _result(true, "Sold %d for $%d." % [quantity, total_sale])
+	var context := _trade_context()
+	return _complete_trade_action(context, trade_state.sell_to_buyer(context, quantity, unit_price, good_id), true)
 
 
 func place_buy_order(quantity: int = -1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
-	_ensure_market()
-	if not _has_transporter():
-		return _result(false, "No transporter is available.")
-	if not _is_trade_good_unlocked(good_id):
-		return _result(false, "That product is not available yet.")
-	if unit_price < 0:
-		unit_price = get_current_buy_price(good_id, active_market_id)
-	if unit_price <= 0:
-		return _result(false, "No buy price is available.")
-
-	var desired_quantity: int = get_runner_trip_unit_capacity(good_id) if quantity <= 0 else quantity
-	var affordable_quantity: int = int(floor(float(cash) / float(unit_price)))
-	var order_quantity: int = min(desired_quantity, affordable_quantity)
-	if order_quantity <= 0:
-		return _result(false, "Not enough cash.")
-
-	var acquired: int = _take_remote_source_inventory(good_id, order_quantity)
-	if acquired <= 0:
-		_restore_remote_source_inventory(good_id, acquired)
-		return _result(false, "Local supply is tight.")
-	order_quantity = acquired
-	if order_quantity <= 0:
-		return _result(false, "Local supply is tight.")
-
-	var total_cost: int = order_quantity * unit_price
-	cash -= total_cost
-	var order: Dictionary = _create_trade_order("buy", good_id, order_quantity, unit_price, total_cost)
-	active_trade_orders[order["id"]] = order
-	if not _is_trade_good_legal(good_id):
-		heat = min(100, heat + order_quantity)
-	var trips: Array = dispatch_queued_trade_trips()
-	state_changed.emit()
-	var result := _result(true, "%s %d unit buy order for $%d." % [
-		"Started" if not trips.is_empty() else "Queued",
-		order_quantity,
-		total_cost,
-	])
-	result["order"] = _get_trade_order(str(order.get("id", "")))
-	result["trips"] = trips
-	return result
+	var context := _trade_context()
+	return _complete_trade_action(context, trade_state.place_buy_order(context, quantity, unit_price, good_id))
 
 
 func place_sell_order(quantity: int = -1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
-	_ensure_market()
-	if not _has_transporter():
-		return _result(false, "No transporter is available.")
-	if not _is_trade_good_unlocked(good_id):
-		return _result(false, "That product is not available yet.")
-	var desired_quantity: int = get_runner_trip_unit_capacity(good_id) if quantity <= 0 else quantity
-	var order_quantity: int = min(desired_quantity, get_available_sell_stock(good_id))
-	if order_quantity <= 0:
-		return _result(false, "No stock to move.")
-	if unit_price < 0:
-		unit_price = get_current_sell_price(good_id, active_market_id)
-	if unit_price <= 0:
-		return _result(false, "No sell price is available.")
-
-	var total_sale: int = order_quantity * unit_price
-	var order: Dictionary = _create_trade_order("sell", good_id, order_quantity, unit_price, total_sale)
-	active_trade_orders[order["id"]] = order
-	reserved_sell_inventory[good_id] = int(reserved_sell_inventory.get(good_id, 0)) + order_quantity
-	var trips: Array = dispatch_queued_trade_trips()
-	state_changed.emit()
-	var result := _result(true, "%s %d unit sell order." % [
-		"Started" if not trips.is_empty() else "Queued",
-		order_quantity,
-	])
-	result["order"] = _get_trade_order(str(order.get("id", "")))
-	result["trips"] = trips
-	return result
+	var context := _trade_context()
+	return _complete_trade_action(context, trade_state.place_sell_order(context, quantity, unit_price, good_id))
 
 
 func pick_up_sell_order(trip_id: String) -> Dictionary:
-	var trip: Dictionary = _get_trade_trip(trip_id)
-	if trip.is_empty() or str(trip.get("type", "")) != "sell":
-		return _result(false, "Sell trip not found.")
-	var good_id: String = str(trip.get("good_id", GOOD_KEY))
-	var quantity: int = int(trip.get("quantity", 0))
-	if get_stock(good_id) < quantity:
-		_cancel_trade_trip(trip_id)
-		state_changed.emit()
-		return _result(false, "Storage no longer has enough goods.")
-
-	inventory[good_id] = get_stock(good_id) - quantity
-	storage_inventory[good_id] = get_stock(good_id)
-	trip["picked_up"] = true
-	trip["status"] = "away"
-	active_trade_trips[trip_id] = trip
-	reserved_sell_inventory[good_id] = max(0, int(reserved_sell_inventory.get(good_id, 0)) - quantity)
-	state_changed.emit()
-	return _result(true, "Picked up %d unit from storage." % quantity)
+	var context := _trade_context()
+	return _complete_trade_action(context, trade_state.pick_up_sell_order(context, trip_id))
 
 
 func deposit_buy_order(trip_id: String) -> Dictionary:
-	var trip: Dictionary = _get_trade_trip(trip_id)
-	if trip.is_empty() or str(trip.get("type", "")) != "buy":
-		return _result(false, "Buy trip not found.")
-	var good_id: String = str(trip.get("good_id", GOOD_KEY))
-	var quantity: int = int(trip.get("quantity", 0))
-	var available_space: int = get_storage_capacity() - get_storage_used()
-	var needed_space: int = quantity * get_unit_weight_kg(good_id)
-	if available_space < needed_space:
-		return _result(false, "Storage is full. Runner is waiting.")
-
-	inventory[good_id] = get_stock(good_id) + quantity
-	storage_inventory[good_id] = get_stock(good_id)
-	_complete_trade_trip(trip_id)
-	_maybe_upgrade_scope()
-	var trips: Array = dispatch_queued_trade_trips()
-	state_changed.emit()
-	var result := _result(true, "Stored %d unit." % quantity)
-	result["trips"] = trips
-	return result
+	var context := _trade_context()
+	return _complete_trade_action(context, trade_state.deposit_buy_order(context, trip_id), true)
 
 
 func complete_sell_order(trip_id: String) -> Dictionary:
-	var trip: Dictionary = _get_trade_trip(trip_id)
-	if trip.is_empty() or str(trip.get("type", "")) != "sell":
-		return _result(false, "Sell trip not found.")
-	var good_id: String = str(trip.get("good_id", GOOD_KEY))
-	var quantity: int = int(trip.get("quantity", 0))
-	var total_sale: int = int(trip.get("value", 0))
-	cash += total_sale
-	if not _is_trade_good_legal(good_id):
-		heat = min(100, heat + quantity * 2)
-	_restore_remote_source_inventory(good_id, quantity)
-	record_progression_event("sale", {
-		"item_id": good_id,
-		"quantity": quantity,
-		"value": total_sale,
-		"market_id": active_market_id,
-	})
-	_complete_trade_trip(trip_id)
-	_maybe_upgrade_scope()
-	var trips: Array = dispatch_queued_trade_trips()
-	state_changed.emit()
-	var result := _result(true, "Runner returned with $%d." % total_sale)
-	result["trips"] = trips
-	return result
+	var context := _trade_context()
+	return _complete_trade_action(context, trade_state.complete_sell_order(context, trip_id), true)
 
 
 func get_trade_orders() -> Array:
-	var orders: Array = []
-	for order_id in active_trade_orders:
-		var order: Variant = active_trade_orders[order_id]
-		if order is Dictionary:
-			orders.append(order.duplicate(true))
-	return orders
+	return trade_state.get_orders()
 
 
 func get_trade_trips() -> Array:
-	var trips: Array = []
-	for trip_id in active_trade_trips:
-		var trip: Variant = active_trade_trips[trip_id]
-		if trip is Dictionary:
-			trips.append(_decorate_trade_trip(trip))
-	return trips
+	return trade_state.get_trips(_trade_context())
 
 
 func update_trade_trip_progress(trip_id: String, phase: String, eta_seconds: float) -> void:
-	if not active_trade_trips.has(trip_id):
-		return
-	var trip: Dictionary = _get_trade_trip(trip_id)
-	trip["phase"] = phase
-	trip["eta_seconds"] = eta_seconds
-	trip["eta_label"] = _format_trade_eta(eta_seconds, phase)
-	active_trade_trips[trip_id] = trip
+	trade_state.update_trip_progress(trip_id, phase, eta_seconds)
 
 
 func get_trade_order_rows() -> Array:
-	var rows: Array = []
-	for order_id in active_trade_orders:
-		var order: Variant = active_trade_orders[order_id]
-		if not (order is Dictionary):
-			continue
-		var pending_quantity: int = int(order.get("pending_quantity", 0))
-		if pending_quantity <= 0:
-			continue
-		var good_id := str(order.get("good_id", GOOD_KEY))
-		var unit_weight: int = get_unit_weight_kg(good_id)
-		var unit_price := int(order.get("unit_price", 0))
-		rows.append({
-			"id": str(order.get("id", "")),
-			"order_id": str(order.get("id", "")),
-			"trip_id": "",
-			"row_type": "order",
-			"direction": _format_trade_direction(str(order.get("type", ""))),
-			"type": str(order.get("type", "")),
-			"good_id": good_id,
-			"good_name": _get_trade_good_name(good_id),
-			"legality_label": _format_legality_label(_get_trade_good_legality(good_id)),
-			"status": "Queued",
-			"quantity": pending_quantity,
-			"total_quantity": int(order.get("total_quantity", 0)),
-			"pending_quantity": pending_quantity,
-			"in_flight_quantity": int(order.get("in_flight_quantity", 0)),
-			"completed_quantity": int(order.get("completed_quantity", 0)),
-			"unit_weight_kg": unit_weight,
-			"holding_weight_kg": 0,
-			"load_weight_kg": pending_quantity * unit_weight,
-			"runner": "Waiting",
-			"eta_seconds": -1.0,
-			"eta_label": "Queued",
-			"risk_label": "Low",
-			"market_id": str(order.get("market_id", active_market_id)),
-			"unit_price": unit_price,
-			"value": int(order.get("value", 0)),
-		})
-
-	for trip_id in active_trade_trips:
-		var trip: Variant = active_trade_trips[trip_id]
-		if trip is Dictionary:
-			rows.append(_build_trade_trip_row(trip))
-	return rows
+	return trade_state.get_order_rows(_trade_context())
 
 
 func get_available_sell_stock(good_id: String = GOOD_KEY) -> int:
-	return max(0, get_stock(good_id) - int(reserved_sell_inventory.get(good_id, 0)))
+	return trade_state.get_available_sell_stock(_trade_context(), good_id)
 
 
 func get_unit_weight_kg(good_id: String = GOOD_KEY) -> int:
-	var source: Dictionary = _get_trade_source(good_id)
-	if source.is_empty():
-		return 1
-	return max(1, int(source.get("unit_weight_kg", 1)))
+	return trade_state.get_unit_weight_kg(good_id)
 
 
 func get_runner_trip_unit_capacity(good_id: String = GOOD_KEY) -> int:
-	return get_transporter_trip_unit_capacity(good_id)
+	return trade_state.get_trip_unit_capacity(_trade_context(), good_id)
 
 
 func get_transporter_trip_unit_capacity(good_id: String = GOOD_KEY) -> int:
-	var carry_capacity := _get_best_transporter_carry_capacity_kg()
-	return int(floor(float(carry_capacity) / float(get_unit_weight_kg(good_id))))
+	return trade_state.get_trip_unit_capacity(_trade_context(), good_id)
 
 
 func dispatch_queued_trade_trips() -> Array:
-	var dispatched: Array = []
-	while true:
-		var crew_index: int = _find_idle_transporter_index()
-		if crew_index < 0:
-			break
-		var order_id: String = _find_dispatchable_trade_order_id()
-		if order_id == "":
-			break
-		var order: Dictionary = active_trade_orders[order_id]
-		var trip_quantity: int = min(get_runner_trip_unit_capacity(str(order.get("good_id", GOOD_KEY))), int(order.get("pending_quantity", 0)))
-		if trip_quantity <= 0:
-			break
-		var crew_member: Dictionary = crew_roster[crew_index]
-		var trip: Dictionary = _create_trade_trip(order, crew_member, trip_quantity)
-		active_trade_trips[trip["id"]] = trip
-		order["pending_quantity"] = int(order.get("pending_quantity", 0)) - trip_quantity
-		order["in_flight_quantity"] = int(order.get("in_flight_quantity", 0)) + trip_quantity
-		order["status"] = "in_flight"
-		active_trade_orders[order_id] = order
-		_set_crew_trade_assignment(crew_index, "Buying" if str(order.get("type", "")) == "buy" else "Selling", str(trip["id"]))
-		dispatched.append(trip.duplicate(true))
-	return dispatched
+	return trade_state.dispatch_queued_trips(_trade_context())
 
 
 func pay_fixer(cost: int = 25, heat_reduction: int = 12) -> Dictionary:
@@ -817,12 +547,11 @@ func remove_crew_member(crew_id: String) -> Dictionary:
 	var crew_member: Dictionary = crew_roster[crew_index]
 	var crew_name := str(crew_member.get("name", "Crew"))
 	var trip_ids_to_cancel: Array = []
-	for trip_id in active_trade_trips:
-		var trip: Variant = active_trade_trips[trip_id]
+	for trip in trade_state.get_trips():
 		if trip is Dictionary and str(trip.get("crew_id", "")) == crew_id:
-			trip_ids_to_cancel.append(str(trip_id))
+			trip_ids_to_cancel.append(str(trip.get("id", "")))
 	for trip_id in trip_ids_to_cancel:
-		_cancel_trade_trip(str(trip_id))
+		trade_state.cancel_trip(_trade_context(), str(trip_id))
 
 	crew_roster.remove_at(crew_index)
 	state_changed.emit()
@@ -1028,21 +757,12 @@ func get_raid_stats() -> Dictionary:
 func get_stock(good_id: String = GOOD_KEY) -> int:
 	return int(inventory.get(good_id, 0))
 
-
 func get_current_buy_price(good_id: String = GOOD_KEY, market_id: String = "") -> int:
-	_ensure_market()
-	var source: Dictionary = _get_trade_source(good_id)
-	if not source.is_empty():
-		return int(source.get("buy_price", 0))
-	return market.get_buy_price(_resolve_market_id(market_id), good_id)
+	return trade_state.get_current_buy_price(_trade_context(), good_id, market_id)
 
 
 func get_current_sell_price(good_id: String = GOOD_KEY, market_id: String = "") -> int:
-	_ensure_market()
-	var source: Dictionary = _get_trade_source(good_id)
-	if not source.is_empty():
-		return int(source.get("sell_price", 0))
-	return market.get_sell_price(_resolve_market_id(market_id), good_id)
+	return trade_state.get_current_sell_price(_trade_context(), good_id, market_id)
 
 
 func get_market_snapshot(market_id: String = "") -> Array:
@@ -1051,52 +771,21 @@ func get_market_snapshot(market_id: String = "") -> Array:
 
 
 func get_available_trade_goods() -> Array:
-	var goods: Array = []
-	for good_id in trade_sources:
-		if not _is_trade_good_unlocked(str(good_id)):
-			continue
-		var source: Dictionary = _get_trade_source(str(good_id))
-		goods.append({
-			"id": str(good_id),
-			"name": str(source.get("name", str(good_id).capitalize().replace("_", " "))),
-			"source_name": str(source.get("source_name", "Remote Source")),
-			"buy_price": get_current_buy_price(str(good_id)),
-			"sell_price": get_current_sell_price(str(good_id)),
-			"unit_weight_kg": get_unit_weight_kg(str(good_id)),
-			"runner_trip_units": get_runner_trip_unit_capacity(str(good_id)),
-			"transporter_trip_units": get_transporter_trip_unit_capacity(str(good_id)),
-			"distance": int(source.get("distance", 0)),
-			"distance_label": get_trade_distance_label(str(good_id)),
-			"base_inventory": get_stock(str(good_id)),
-			"available_sell_inventory": get_available_sell_stock(str(good_id)),
-			"remote_inventory": get_remote_inventory_for_good(str(good_id)),
-			"remote_inventory_label": get_remote_inventory_label(str(good_id)),
-			"legality": _get_trade_good_legality(str(good_id)),
-			"legality_label": _format_legality_label(_get_trade_good_legality(str(good_id))),
-			"legal": _is_trade_good_legal(str(good_id)),
-		})
-	return goods
+	return trade_state.get_available_goods(_trade_context())
 
 
 func get_remote_inventory_for_good(good_id: String) -> int:
-	var source: Dictionary = _get_trade_source(good_id)
-	if source.is_empty():
-		return int(floor(_get_market_inventory(good_id)))
-	return int(source.get("source_inventory", 0))
+	return trade_state.get_remote_inventory(_trade_context(), good_id)
 
 
 func get_remote_inventory_label(good_id: String) -> String:
-	var remote_inventory: int = get_remote_inventory_for_good(good_id)
-	if remote_inventory == TRADE_SOURCE_INFINITE:
-		return "Infinite"
-	return "%d units" % remote_inventory
+	return trade_state.get_remote_inventory_label(_trade_context(), good_id)
 
 
 func get_trade_distance_label(good_id: String) -> String:
-	var source: Dictionary = _get_trade_source(good_id)
-	if source.is_empty():
-		return "Local"
-	return str(source.get("distance_label", "%d blocks" % int(source.get("distance", 0))))
+	return trade_state.get_distance_label(good_id)
+
+
 
 
 func advance_market(days: int = 1) -> void:
@@ -1148,14 +837,7 @@ func is_unlocked(unlock_id: String) -> bool:
 
 
 func unlock_trade_good(good_id: String) -> bool:
-	if not trade_sources.has(good_id):
-		return false
-	var source: Dictionary = trade_sources[good_id]
-	if bool(source.get("unlocked", false)):
-		return false
-	source["unlocked"] = true
-	trade_sources[good_id] = source
-	return true
+	return trade_state.unlock_good(good_id)
 
 
 func get_progress_metric(metric_name: String, item_id: String = "") -> float:
@@ -1602,360 +1284,6 @@ func _is_crew_member_alive(crew_member: Dictionary) -> bool:
 	return int(crew_member.get("health", 1)) > 0
 
 
-func _find_idle_transporter_index() -> int:
-	for index in range(crew_roster.size()):
-		var crew_member: Variant = crew_roster[index]
-		if not (crew_member is Dictionary):
-			continue
-		if not _is_crew_member_alive(crew_member):
-			continue
-		if not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, "transporter"):
-			continue
-		if str(crew_member.get("status", "Ready")) != "Ready":
-			continue
-		if NPC_ROLE_CATALOG_SCRIPT.can_do_task_type(crew_member, "transport"):
-			return index
-	return -1
-
-
-func _find_idle_runner_index() -> int:
-	return _find_idle_transporter_index()
-
-
-func _has_transporter() -> bool:
-	for crew_member in crew_roster:
-		if not (crew_member is Dictionary):
-			continue
-		if not _is_crew_member_alive(crew_member):
-			continue
-		if not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, "transporter"):
-			continue
-		if NPC_ROLE_CATALOG_SCRIPT.can_do_task_type(crew_member, "transport"):
-			return true
-	return false
-
-
-func _has_runner() -> bool:
-	return _has_transporter()
-
-
-func _get_best_transporter_carry_capacity_kg() -> int:
-	var best_capacity := RUNNER_CARRY_CAPACITY_KG
-	for crew_member in crew_roster:
-		if not (crew_member is Dictionary):
-			continue
-		if not _is_crew_member_alive(crew_member):
-			continue
-		if not NPC_ROLE_CATALOG_SCRIPT.has_role(crew_member, "transporter"):
-			continue
-		best_capacity = max(best_capacity, NPC_ROLE_CATALOG_SCRIPT.get_carry_capacity_kg(crew_member, RUNNER_CARRY_CAPACITY_KG))
-	return best_capacity
-
-
-func _find_dispatchable_trade_order_id() -> String:
-	for order_id in active_trade_orders:
-		var order: Variant = active_trade_orders[order_id]
-		if order is Dictionary and int(order.get("pending_quantity", 0)) > 0:
-			return str(order_id)
-	return ""
-
-
-func _get_trade_source(good_id: String) -> Dictionary:
-	var source: Variant = trade_sources.get(good_id, {})
-	if source is Dictionary:
-		return source.duplicate(true)
-	return {}
-
-
-func _get_trade_good_name(good_id: String) -> String:
-	var source: Dictionary = _get_trade_source(good_id)
-	if not source.is_empty():
-		return str(source.get("name", good_id.capitalize().replace("_", " ")))
-	_ensure_market()
-	var good: Dictionary = market.get_good(good_id)
-	if not good.is_empty():
-		return str(good.get("name", good_id.capitalize().replace("_", " ")))
-	return good_id.capitalize().replace("_", " ")
-
-
-func _is_trade_good_unlocked(good_id: String) -> bool:
-	var source: Dictionary = _get_trade_source(good_id)
-	return not source.is_empty() and bool(source.get("unlocked", false))
-
-
-func _is_trade_good_legal(good_id: String) -> bool:
-	return _get_trade_good_legality(good_id) == LEGALITY_LEGAL
-
-
-func _get_trade_good_legality(good_id: String) -> String:
-	var source: Dictionary = _get_trade_source(good_id)
-	if source.has("legality"):
-		return _normalize_legality(str(source.get("legality", LEGALITY_ILLICIT)))
-	return LEGALITY_LEGAL if bool(source.get("legal", false)) else LEGALITY_ILLICIT
-
-
-func _normalize_legality(value: String) -> String:
-	var normalized := value.strip_edges().to_lower()
-	match normalized:
-		LEGALITY_LEGAL, LEGALITY_ILLICIT, LEGALITY_CONTROLLED, LEGALITY_ILLEGAL, LEGALITY_TABOO:
-			return normalized
-		"illiegal":
-			return LEGALITY_ILLEGAL
-	return LEGALITY_ILLICIT
-
-
-func _format_legality_label(legality: String) -> String:
-	return _normalize_legality(legality).capitalize()
-
-
-func _take_remote_source_inventory(good_id: String, quantity: int) -> int:
-	if quantity <= 0:
-		return 0
-	if trade_sources.has(good_id):
-		var source: Dictionary = trade_sources[good_id]
-		var source_inventory: int = int(source.get("source_inventory", 0))
-		if source_inventory == TRADE_SOURCE_INFINITE:
-			return quantity
-		var acquired: int = min(quantity, max(0, source_inventory))
-		source["source_inventory"] = source_inventory - acquired
-		trade_sources[good_id] = source
-		return acquired
-
-	_ensure_market()
-	var acquired_from_market: float = market.remove_inventory(active_market_id, good_id, float(quantity))
-	return int(floor(acquired_from_market))
-
-
-func _restore_remote_source_inventory(good_id: String, quantity: int) -> void:
-	if quantity <= 0:
-		return
-	if trade_sources.has(good_id):
-		var source: Dictionary = trade_sources[good_id]
-		var source_inventory: int = int(source.get("source_inventory", 0))
-		if source_inventory != TRADE_SOURCE_INFINITE:
-			source["source_inventory"] = source_inventory + quantity
-			trade_sources[good_id] = source
-		return
-
-	_ensure_market()
-	market.add_inventory(active_market_id, good_id, float(quantity))
-
-
-func _get_market_inventory(good_id: String) -> float:
-	_ensure_market()
-	for item in market.get_market_snapshot(active_market_id):
-		if item is Dictionary and str(item.get("id", "")) == good_id:
-			return float(item.get("inventory", 0.0))
-	return 0.0
-
-
-func _create_trade_order(order_type: String, good_id: String, quantity: int, unit_price: int, value: int) -> Dictionary:
-	var order_id := "trade_order_%d" % next_trade_order_id
-	next_trade_order_id += 1
-	return {
-		"id": order_id,
-		"type": order_type,
-		"good_id": good_id,
-		"total_quantity": quantity,
-		"pending_quantity": quantity,
-		"in_flight_quantity": 0,
-		"completed_quantity": 0,
-		"unit_price": unit_price,
-		"value": value,
-		"market_id": active_market_id,
-		"status": "queued",
-		"trip_ids": [],
-	}
-
-
-func _get_trade_order(order_id: String) -> Dictionary:
-	var order: Variant = active_trade_orders.get(order_id, {})
-	if order is Dictionary:
-		return order.duplicate(true)
-	return {}
-
-
-func _create_trade_trip(order: Dictionary, crew_member: Dictionary, quantity: int) -> Dictionary:
-	var trip_id := "trade_trip_%d" % next_trade_trip_id
-	next_trade_trip_id += 1
-	var order_id := str(order.get("id", ""))
-	var order_trip_ids: Array = order.get("trip_ids", [])
-	order_trip_ids.append(trip_id)
-	order["trip_ids"] = order_trip_ids
-	active_trade_orders[order_id] = order
-	return {
-		"id": trip_id,
-		"order_id": order_id,
-		"type": str(order.get("type", "")),
-		"crew_id": str(crew_member.get("id", "")),
-		"crew_name": str(crew_member.get("name", "Runner")),
-		"good_id": str(order.get("good_id", GOOD_KEY)),
-		"quantity": quantity,
-		"unit_price": int(order.get("unit_price", 0)),
-		"value": quantity * int(order.get("unit_price", 0)),
-		"market_id": active_market_id,
-		"status": "in_flight",
-		"phase": "queued",
-		"eta_seconds": -1.0,
-		"eta_label": "Queued",
-		"risk_label": "Low",
-		"picked_up": false,
-	}
-
-
-func _get_trade_trip(trip_id: String) -> Dictionary:
-	var trip: Variant = active_trade_trips.get(trip_id, {})
-	if trip is Dictionary:
-		return trip.duplicate(true)
-	return {}
-
-
-func _decorate_trade_trip(trip: Dictionary) -> Dictionary:
-	var decorated := trip.duplicate(true)
-	var good_id := str(decorated.get("good_id", GOOD_KEY))
-	var unit_weight := get_unit_weight_kg(good_id)
-	var phase := str(decorated.get("phase", ""))
-	decorated["good_name"] = _get_trade_good_name(good_id)
-	decorated["direction"] = _format_trade_direction(str(decorated.get("type", "")))
-	decorated["unit_weight_kg"] = unit_weight
-	decorated["load_weight_kg"] = int(decorated.get("quantity", 0)) * unit_weight
-	decorated["holding_weight_kg"] = _get_trade_trip_holding_weight_kg(decorated)
-	decorated["status_label"] = _format_trade_trip_status(decorated)
-	decorated["eta_label"] = _format_trade_eta(float(decorated.get("eta_seconds", -1.0)), phase)
-	decorated["risk_label"] = str(decorated.get("risk_label", "Low"))
-	decorated["legality_label"] = _format_legality_label(_get_trade_good_legality(good_id))
-	return decorated
-
-
-func _build_trade_trip_row(trip: Dictionary) -> Dictionary:
-	var decorated := _decorate_trade_trip(trip)
-	return {
-		"id": str(decorated.get("id", "")),
-		"order_id": str(decorated.get("order_id", "")),
-		"trip_id": str(decorated.get("id", "")),
-		"row_type": "trip",
-		"direction": str(decorated.get("direction", "")),
-		"type": str(decorated.get("type", "")),
-		"good_id": str(decorated.get("good_id", GOOD_KEY)),
-		"good_name": str(decorated.get("good_name", "Product")),
-		"legality_label": str(decorated.get("legality_label", "Unknown")),
-		"status": str(decorated.get("status_label", "In flight")),
-		"quantity": int(decorated.get("quantity", 0)),
-		"total_quantity": int(decorated.get("quantity", 0)),
-		"pending_quantity": 0,
-		"in_flight_quantity": int(decorated.get("quantity", 0)),
-		"completed_quantity": 0,
-		"unit_weight_kg": int(decorated.get("unit_weight_kg", 1)),
-		"holding_weight_kg": int(decorated.get("holding_weight_kg", 0)),
-		"load_weight_kg": int(decorated.get("load_weight_kg", 0)),
-		"runner": str(decorated.get("crew_name", "Runner")),
-		"eta_seconds": float(decorated.get("eta_seconds", -1.0)),
-		"eta_label": str(decorated.get("eta_label", "Calculating")),
-		"risk_label": str(decorated.get("risk_label", "Low")),
-		"market_id": str(decorated.get("market_id", active_market_id)),
-		"unit_price": int(decorated.get("unit_price", 0)),
-		"value": int(decorated.get("value", 0)),
-		"phase": str(decorated.get("phase", "")),
-		"picked_up": bool(decorated.get("picked_up", false)),
-	}
-
-
-func _get_trade_trip_holding_weight_kg(trip: Dictionary) -> int:
-	var order_type := str(trip.get("type", ""))
-	var phase := str(trip.get("phase", ""))
-	var quantity := int(trip.get("quantity", 0))
-	var unit_weight := get_unit_weight_kg(str(trip.get("good_id", GOOD_KEY)))
-	if order_type == "buy" and ["away_buy", "to_storage", "waiting_storage"].has(phase):
-		return quantity * unit_weight
-	if order_type == "sell" and bool(trip.get("picked_up", false)) and ["to_exit", "away_sell"].has(phase):
-		return quantity * unit_weight
-	return 0
-
-
-func _format_trade_direction(order_type: String) -> String:
-	return "Incoming" if order_type == "buy" else "Outgoing"
-
-
-func _format_trade_trip_status(trip: Dictionary) -> String:
-	var order_type := str(trip.get("type", ""))
-	match str(trip.get("phase", "")):
-		"to_exit":
-			return "Heading out" if order_type == "buy" else "Leaving with goods"
-		"away_buy":
-			return "Buying"
-		"to_storage":
-			return "Returning to storage" if order_type == "buy" else "Going to storage"
-		"waiting_storage":
-			return "Waiting for storage"
-		"away_sell":
-			return "Selling"
-		"return_idle":
-			return "Returning with cash"
-		"queued":
-			return "Queued"
-	return str(trip.get("status", "In flight")).capitalize().replace("_", " ")
-
-
-func _format_trade_eta(eta_seconds: float, phase: String = "") -> String:
-	if phase == "waiting_storage":
-		return "Waiting"
-	if eta_seconds < 0.0:
-		return "Queued"
-	var rounded_seconds := int(ceil(eta_seconds))
-	if rounded_seconds <= 0:
-		return "Any moment"
-	return "%ds" % rounded_seconds
-
-
-func _set_crew_trade_assignment(crew_index: int, status: String, assignment_id: String) -> void:
-	var crew_member: Dictionary = crew_roster[crew_index]
-	crew_member["assigned_task"] = assignment_id
-	crew_member["status"] = status
-	crew_roster[crew_index] = crew_member
-
-
-func _complete_trade_trip(trip_id: String) -> void:
-	var trip: Dictionary = _get_trade_trip(trip_id)
-	if trip.is_empty():
-		return
-	var order_id: String = str(trip.get("order_id", ""))
-	var order: Dictionary = _get_trade_order(order_id)
-	if not order.is_empty():
-		var quantity: int = int(trip.get("quantity", 0))
-		order["in_flight_quantity"] = max(0, int(order.get("in_flight_quantity", 0)) - quantity)
-		order["completed_quantity"] = int(order.get("completed_quantity", 0)) + quantity
-		order["status"] = "queued" if int(order.get("pending_quantity", 0)) > 0 else "in_flight"
-		if int(order.get("completed_quantity", 0)) >= int(order.get("total_quantity", 0)):
-			active_trade_orders.erase(order_id)
-		else:
-			active_trade_orders[order_id] = order
-	var crew_index: int = _find_crew_index(str(trip.get("crew_id", "")))
-	if crew_index >= 0:
-		_set_crew_trade_assignment(crew_index, "Ready", "")
-	active_trade_trips.erase(trip_id)
-
-
-func _cancel_trade_trip(trip_id: String) -> void:
-	var trip: Dictionary = _get_trade_trip(trip_id)
-	if trip.is_empty():
-		return
-	var order_id: String = str(trip.get("order_id", ""))
-	var order: Dictionary = _get_trade_order(order_id)
-	var quantity: int = int(trip.get("quantity", 0))
-	var good_id: String = str(trip.get("good_id", GOOD_KEY))
-	if str(trip.get("type", "")) == "sell" and bool(trip.get("picked_up", false)):
-		inventory[good_id] = get_stock(good_id) + quantity
-		storage_inventory[good_id] = get_stock(good_id)
-		reserved_sell_inventory[good_id] = int(reserved_sell_inventory.get(good_id, 0)) + quantity
-	if not order.is_empty():
-		order["in_flight_quantity"] = max(0, int(order.get("in_flight_quantity", 0)) - quantity)
-		order["pending_quantity"] = int(order.get("pending_quantity", 0)) + quantity
-		order["status"] = "queued"
-		active_trade_orders[order_id] = order
-	var crew_index: int = _find_crew_index(str(trip.get("crew_id", "")))
-	if crew_index >= 0:
-		_set_crew_trade_assignment(crew_index, "Ready", "")
-	active_trade_trips.erase(trip_id)
 
 
 func _find_transport_task(task_id: String) -> Dictionary:
@@ -2005,6 +1333,36 @@ func _apply_progression_event_effects(event: Dictionary) -> void:
 
 func _resolve_market_id(market_id: String) -> String:
 	return active_market_id if market_id == "" else market_id
+
+
+func _trade_context() -> Dictionary:
+	_ensure_market()
+	return {
+		"cash": cash,
+		"heat": heat,
+		"inventory": inventory,
+		"storage_inventory": storage_inventory,
+		"storage_capacity": storage_capacity,
+		"crew_roster": crew_roster,
+		"market": market,
+		"active_market_id": active_market_id,
+	}
+
+
+func _complete_trade_action(context: Dictionary, action_result: Dictionary, upgrade_scope: bool = false) -> Dictionary:
+	cash = int(context.get("cash", cash))
+	heat = int(context.get("heat", heat))
+	var result := action_result.duplicate(true)
+	var progression_events: Array = result.get("progression_events", [])
+	result.erase("progression_events")
+	for event in progression_events:
+		if event is Dictionary:
+			record_progression_event(str(event.get("type", "")), event.get("payload", {}))
+	if bool(result.get("ok", false)):
+		if upgrade_scope:
+			_maybe_upgrade_scope()
+		state_changed.emit()
+	return result
 
 
 func _result(ok: bool, message: String) -> Dictionary:

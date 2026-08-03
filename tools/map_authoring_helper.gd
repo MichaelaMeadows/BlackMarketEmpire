@@ -15,6 +15,7 @@ static func building_layout(id_prefix: String, rect: Rect2, options: Dictionary 
 	var door_width: float = max(float(options.get("door_width", DEFAULT_BUILDING_DOOR_WIDTH)), minimum_gap)
 	var wall_color = options.get("wall_color", null)
 	var interior_wall_color = options.get("interior_wall_color", wall_color)
+	var rooms := _normalize_rooms(options.get("rooms", []), rect.position, bool(options.get("rooms_are_local", false)))
 	var building := {
 		"id": id_prefix,
 		"name": str(options.get("name", id_prefix.capitalize())),
@@ -26,7 +27,7 @@ static func building_layout(id_prefix: String, rect: Rect2, options: Dictionary 
 		"color": options.get("color", [0.16, 0.18, 0.19]),
 		"trim_color": options.get("trim_color", [0.30, 0.32, 0.30]),
 		"collides": false,
-		"rooms": options.get("rooms", []),
+		"rooms": rooms,
 	}
 
 	var doors_value: Variant = options.get("doors", {})
@@ -39,7 +40,17 @@ static func building_layout(id_prefix: String, rect: Rect2, options: Dictionary 
 	if dividers_value is Array:
 		for divider in dividers_value:
 			if divider is Dictionary:
-				walls.append_array(divider_wall(id_prefix, divider, thickness, interior_wall_color, minimum_gap))
+				var normalized_divider: Dictionary = divider.duplicate(true)
+				if bool(normalized_divider.get("local", false)):
+					normalized_divider["x"] = rect.position.x + float(normalized_divider.get("x", 0.0))
+					normalized_divider["y"] = rect.position.y + float(normalized_divider.get("y", 0.0))
+				walls.append_array(divider_wall(id_prefix, normalized_divider, thickness, interior_wall_color, minimum_gap))
+
+	var connections_value: Variant = options.get("room_connections", [])
+	if connections_value is Array:
+		for connection in connections_value:
+			if connection is Dictionary:
+				walls.append_array(room_connection_wall(id_prefix, rooms, connection, thickness, interior_wall_color, minimum_gap))
 
 	return {
 		"building": building,
@@ -86,6 +97,53 @@ static func divider_wall(id_prefix: String, divider: Dictionary, thickness: floa
 	return walls
 
 
+static func room_connection_wall(id_prefix: String, rooms: Array, connection: Dictionary, thickness: float = DEFAULT_BUILDING_WALL_THICKNESS, color = null, minimum_gap: float = DEFAULT_PLAYER_CLEARANCE) -> Array:
+	var first: Dictionary = _find_room(rooms, str(connection.get("room_a", "")))
+	var second: Dictionary = _find_room(rooms, str(connection.get("room_b", "")))
+	if first.is_empty() or second.is_empty():
+		return []
+	var first_rect: Rect2 = _read_rect(first.get("rect", []))
+	var second_rect: Rect2 = _read_rect(second.get("rect", []))
+	var wall_id: String = str(connection.get("id", "%s_%s" % [str(first.get("id", "room_a")), str(second.get("id", "room_b"))]))
+	var door_width: float = max(minimum_gap, float(connection.get("door_width", DEFAULT_BUILDING_DOOR_WIDTH)))
+
+	var divider: Dictionary = {"id": wall_id}
+	if first_rect.end.x <= second_rect.position.x or second_rect.end.x <= first_rect.position.x:
+		var left_rect: Rect2 = first_rect if first_rect.get_center().x < second_rect.get_center().x else second_rect
+		var right_rect: Rect2 = second_rect if left_rect == first_rect else first_rect
+		var overlap_start: float = max(left_rect.position.y, right_rect.position.y)
+		var overlap_end: float = min(left_rect.end.y, right_rect.end.y)
+		var gap: float = right_rect.position.x - left_rect.end.x
+		if overlap_end <= overlap_start or gap < 0.0:
+			return []
+		divider.merge({
+			"axis": "vertical",
+			"x": left_rect.end.x,
+			"y": overlap_start,
+			"height": overlap_end - overlap_start,
+			"doors": [[max(0.0, (overlap_end - overlap_start - door_width) * 0.5), door_width]],
+		})
+		return divider_wall(id_prefix, divider, max(1.0, gap if gap > 0.0 else thickness), color, minimum_gap)
+
+	if first_rect.end.y <= second_rect.position.y or second_rect.end.y <= first_rect.position.y:
+		var top_rect: Rect2 = first_rect if first_rect.get_center().y < second_rect.get_center().y else second_rect
+		var bottom_rect: Rect2 = second_rect if top_rect == first_rect else first_rect
+		var overlap_start: float = max(top_rect.position.x, bottom_rect.position.x)
+		var overlap_end: float = min(top_rect.end.x, bottom_rect.end.x)
+		var gap: float = bottom_rect.position.y - top_rect.end.y
+		if overlap_end <= overlap_start or gap < 0.0:
+			return []
+		divider.merge({
+			"axis": "horizontal",
+			"x": overlap_start,
+			"y": top_rect.end.y,
+			"width": overlap_end - overlap_start,
+			"doors": [[max(0.0, (overlap_end - overlap_start - door_width) * 0.5), door_width]],
+		})
+		return divider_wall(id_prefix, divider, max(1.0, gap if gap > 0.0 else thickness), color, minimum_gap)
+	return []
+
+
 static func horizontal_wall(id: String, x: float, y: float, width: float, thickness: float = 24.0, color = null) -> Dictionary:
 	var wall := {
 		"id": id,
@@ -117,6 +175,29 @@ static func tree(id: String, position: Vector2, radius: float = 24.0, collides: 
 		"collision_radius": radius * 0.55,
 		"collides": collides,
 	}
+
+
+static func _normalize_rooms(rooms_value: Variant, offset: Vector2, rooms_are_local: bool) -> Array:
+	var rooms: Array = []
+	if not (rooms_value is Array):
+		return rooms
+	for room_value in rooms_value:
+		if not (room_value is Dictionary):
+			continue
+		var room: Dictionary = room_value.duplicate(true)
+		var room_rect := _read_rect(room.get("rect", []))
+		if rooms_are_local:
+			room_rect.position += offset
+		room["rect"] = _rect_to_array(room_rect)
+		rooms.append(room)
+	return rooms
+
+
+static func _find_room(rooms: Array, room_id: String) -> Dictionary:
+	for room_value in rooms:
+		if room_value is Dictionary and str(room_value.get("id", "")) == room_id:
+			return room_value
+	return {}
 
 
 static func _add_horizontal_wall(walls: Array, id: String, start: Vector2, width: float, thickness: float, doors: Array, color = null, minimum_gap: float = DEFAULT_PLAYER_CLEARANCE) -> void:
@@ -170,3 +251,11 @@ static func _centered_door(rect: Rect2, side: String, width: float) -> Array:
 
 static func _rect_to_array(rect: Rect2) -> Array:
 	return [rect.position.x, rect.position.y, rect.size.x, rect.size.y]
+
+
+static func _read_rect(value: Variant) -> Rect2:
+	if value is Rect2:
+		return value
+	if value is Array and value.size() >= 4:
+		return Rect2(float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+	return Rect2()

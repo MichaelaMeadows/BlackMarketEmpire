@@ -166,7 +166,7 @@
 			"collides": false,
 			"rooms": [
 				{"id": "front_counter", "rect": [1146, -1294, 360, 230]},
-				{"id": "kitchen", "rect": [1530, -1294, 184, 230]},
+				{"id": "diner_kitchen", "rect": [1530, -1294, 184, 230]},
 				{"id": "cold_room", "rect": [1530, -1040, 184, 114]}
 			]
 		},
@@ -217,7 +217,7 @@
 			"rooms": [
 				{"id": "repair_bay", "rect": [386, 526, 310, 308]},
 				{"id": "parts_room", "rect": [720, 526, 154, 180]},
-				{"id": "office", "rect": [720, 730, 154, 104]}
+				{"id": "garage_office", "rect": [720, 730, 154, 104]}
 			]
 		},
 		{

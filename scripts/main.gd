@@ -7,6 +7,9 @@ const MAP_LOADER_SCRIPT := preload("res://scripts/map_loader.gd")
 const NAVIGATION_MOVER_SCRIPT := preload("res://scripts/navigation_mover.gd")
 const PHONE_UI_SCRIPT := preload("res://scripts/phone_ui.gd")
 const GAME_STATE_SCRIPT := preload("res://scripts/autoload/game_state.gd")
+const UI_TOKENS := preload("res://scripts/ui/ui_tokens.gd")
+const UI_THEME := preload("res://scripts/ui/ui_theme.gd")
+const UI := preload("res://scripts/ui/ui_factory.gd")
 const HOME_MAP_PATH := "res://maps/starter_house.json"
 const DEFAULT_MAP_PATH := HOME_MAP_PATH
 const RUNNER_TRAVEL_SPEED := 120.0
@@ -316,6 +319,7 @@ func _build_hud() -> void:
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.theme = UI_THEME.create()
 	margin.add_theme_constant_override("margin_left", 18)
 	margin.add_theme_constant_override("margin_top", 18)
 	margin.add_theme_constant_override("margin_right", 18)
@@ -344,8 +348,7 @@ func _build_hud() -> void:
 	ammo_label.add_theme_font_size_override("font_size", 16)
 	combat_row.add_child(ammo_label)
 
-	reload_button = Button.new()
-	reload_button.text = "Reload"
+	reload_button = UI.button("Reload", "Reload equipped weapon")
 	reload_button.focus_mode = Control.FOCUS_NONE
 	reload_button.pressed.connect(_on_reload_pressed)
 	combat_row.add_child(reload_button)
@@ -361,6 +364,7 @@ func _build_hud() -> void:
 	status_label = Label.new()
 	status_label.add_theme_font_size_override("font_size", 16)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status_label.modulate = UI_TOKENS.DUST
 	layout.add_child(status_label)
 
 	progression_dialog = AcceptDialog.new()

@@ -14,7 +14,7 @@
 		{"id": "depot_yard", "name": "Depot Yard", "visual_id": "concrete_yard", "rect": [-1060, -640, 2120, 1280], "color": [0.074, 0.078, 0.074, 0.96]},
 		{"id": "service_lane", "name": "Service Lane", "visual_id": "asphalt_road", "rect": [-1200, 650, 2400, 180], "color": [0.060, 0.064, 0.066, 1.0]}
 	],
-	"buildings": [
+	"building_layouts": [
 		{
 			"id": "depot_office",
 			"name": "Depot Office",
@@ -23,26 +23,27 @@
 			"floor_material": "store_concrete",
 			"wall_material": "cinder_block",
 			"rect": [-300, -360, 760, 520],
+			"thickness": 30,
+			"door_width": 112,
+			"door_side": "south",
 			"color": [0.150, 0.158, 0.150],
 			"trim_color": [0.330, 0.330, 0.300],
-			"collides": false,
+			"wall_color": [0.330, 0.330, 0.300],
+			"interior_wall_color": [0.280, 0.280, 0.255],
+			"rooms_are_local": true,
 			"rooms": [
-				{"id": "loading_floor", "name": "Loading Floor", "rect": [-274, -334, 430, 468]},
-				{"id": "office_cage", "name": "Office Cage", "rect": [180, -334, 254, 220]},
-				{"id": "stash_room", "name": "Stash Room", "rect": [180, -90, 254, 224]}
+				{"id": "loading_floor", "name": "Loading Floor", "rect": [26, 26, 430, 468]},
+				{"id": "office_cage", "name": "Office Cage", "rect": [480, 26, 254, 220]},
+				{"id": "stash_room", "name": "Stash Room", "rect": [480, 270, 254, 224]}
+			],
+			"room_connections": [
+				{"room_a": "loading_floor", "room_b": "office_cage"},
+				{"room_a": "loading_floor", "room_b": "stash_room"},
+				{"room_a": "office_cage", "room_b": "stash_room"}
 			]
 		}
 	],
 	"walls": [
-		{"id": "depot_north", "rect": [-300, -360, 760, 30], "color": [0.330, 0.330, 0.300], "collides": true},
-		{"id": "depot_south_w", "rect": [-300, 130, 304, 30], "color": [0.330, 0.330, 0.300], "collides": true},
-		{"id": "depot_south_e", "rect": [116, 130, 344, 30], "color": [0.330, 0.330, 0.300], "collides": true},
-		{"id": "depot_west", "rect": [-300, -360, 30, 520], "color": [0.330, 0.330, 0.300], "collides": true},
-		{"id": "depot_east", "rect": [430, -360, 30, 520], "color": [0.330, 0.330, 0.300], "collides": true},
-		{"id": "depot_cage_split_a", "rect": [156, -330, 24, 170], "color": [0.280, 0.280, 0.255], "collides": true},
-		{"id": "depot_cage_split_b", "rect": [156, -40, 24, 174], "color": [0.280, 0.280, 0.255], "collides": true},
-		{"id": "depot_storage_split_w", "rect": [180, -114, 66, 24], "color": [0.280, 0.280, 0.255], "collides": true},
-		{"id": "depot_storage_split_e", "rect": [358, -114, 76, 24], "color": [0.280, 0.280, 0.255], "collides": true},
 		{"id": "yard_fence_west", "rect": [-1060, -640, 18, 1280], "color": [0.210, 0.200, 0.170], "collides": true},
 		{"id": "yard_fence_east", "rect": [1042, -640, 18, 1280], "color": [0.210, 0.200, 0.170], "collides": true},
 		{"id": "yard_fence_north", "rect": [-1060, -640, 2120, 18], "color": [0.210, 0.200, 0.170], "collides": true}

@@ -16,6 +16,7 @@ func _init() -> void:
 	_test_two_room_gap_infers_one_interior_doorway()
 	_test_blocked_doorway_map_reports_validation_issue()
 	_test_region_ids_track_connected_components()
+	_test_repeated_paths_use_bounded_cache()
 
 	if _failures == 0:
 		print("Map navigation tests passed.")
@@ -29,10 +30,12 @@ func _test_starter_house_key_positions_are_walkable() -> void:
 	get_root().add_child(map_loader)
 	_expect(map_loader.load_map(STARTER_MAP_PATH), "starter map loads for navigation")
 	var navigation = map_loader.get_navigation()
+	var benji_position := _npc_position(map_loader, "benji_runner")
+	var storage_position := _facility_position(map_loader, "stash_shelf")
 	_expect(navigation != null, "starter map creates navigation service")
 	_expect(navigation.is_walkable(map_loader.get_player_start()), "player start is walkable")
-	_expect(navigation.is_walkable(Vector2(-300.0, -100.0)), "Benji start is walkable")
-	_expect(navigation.is_walkable(Vector2(204.0, 184.0)), "storage approach is walkable")
+	_expect(navigation.is_walkable(benji_position), "Benji start is walkable")
+	_expect(navigation.is_walkable(storage_position), "storage approach is walkable")
 	_expect(navigation.is_walkable(navigation.find_nearest_walkable(Vector2(0.0, 780.0))), "outside exit resolves to walkable edge")
 	_expect(navigation.validate_map().is_empty(), "starter house rooms validate as reachable")
 	map_loader.free()
@@ -44,21 +47,23 @@ func _test_starter_house_room_geometry() -> void:
 	_expect(map_loader.load_map(STARTER_MAP_PATH), "starter map loads for room geometry")
 	var navigation = map_loader.get_navigation()
 	_expect(navigation.get_room_id_at(map_loader.get_player_start()) == "bedroom", "player start resolves to bedroom")
-	_expect(navigation.get_room_id_at(Vector2(-300.0, -100.0)) == "living_room", "Benji resolves to living room")
-	_expect(navigation.get_room_id_at(Vector2(270.0, -180.0)) == "kitchen", "kitchen workbench resolves to kitchen")
-	_expect(navigation.get_room_id_at(Vector2(-100.0, 120.0)) == "bathroom", "bathroom point resolves to bathroom")
-	_expect(navigation.get_room_id_at(Vector2(204.0, 184.0)) == "basement_storage", "storage point resolves to storage")
+	_expect(navigation.get_room_id_at(_npc_position(map_loader, "benji_runner")) == "living_room", "Benji resolves to living room")
+	_expect(navigation.get_room_id_at(_facility_position(map_loader, "basic_workbench")) == "kitchen", "kitchen workbench resolves to kitchen")
+	_expect(navigation.get_room_id_at(navigation.get_room("bathroom").get("position", Vector2.ZERO)) == "bathroom", "bathroom navigation point resolves to bathroom")
+	_expect(navigation.get_room_id_at(_facility_position(map_loader, "stash_shelf")) == "basement_storage", "storage facility resolves to storage")
+	_expect(navigation.get_room("spare_room").get("slot_ids", []).size() == 2, "spare room exposes two future build slots")
 	_expect(navigation.get_room("living_room").get("building_id", "") == "starter_house", "room lookup returns building id")
 
 	var has_front_door := false
 	for doorway in navigation.get_doorways():
 		if str(doorway.get("kind", "")) == "exterior" and str(doorway.get("side", "")) == "south":
 			var position: Vector2 = doorway.get("position", Vector2.ZERO)
-			if abs(position.x) <= 96.0 and position.y >= 392.0:
+			if str(doorway.get("building_id", "")) == "starter_house":
 				has_front_door = true
 	_expect(has_front_door, "starter house exposes front exterior doorway")
-	_expect(navigation.find_room_path("bedroom", "basement_storage").size() >= 2, "room graph paths bedroom to storage")
-	_expect(navigation.find_room_path("living_room", "kitchen").size() >= 2, "room graph paths living room to kitchen")
+	_expect(navigation.find_room_path("bedroom", "basement_storage") == ["bedroom", "bathroom", "basement_storage"], "room graph follows actual doors from bedroom to storage")
+	_expect(navigation.find_room_path("living_room", "kitchen") == ["living_room", "kitchen"], "room graph directly connects adjacent living room and kitchen")
+	_expect(navigation.find_room_path("living_room", "basement_storage") == ["living_room", "bathroom", "basement_storage"], "room graph follows the central rooms to storage")
 	map_loader.free()
 
 
@@ -194,10 +199,40 @@ func _test_region_ids_track_connected_components() -> void:
 	_expect(left_region != right_region, "separated islands receive different region ids")
 
 
+func _test_repeated_paths_use_bounded_cache() -> void:
+	var navigation = _new_navigation({
+		"bounds": [0, 0, 320, 224],
+		"player_start": [32, 32],
+		"walls": [{"id": "divider", "rect": [128, 0, 32, 128], "collides": true}],
+	})
+	var first_path: PackedVector2Array = navigation.find_path(Vector2(32, 32), Vector2(240, 32))
+	var first_stats: Dictionary = navigation.get_path_cache_stats()
+	var second_path: PackedVector2Array = navigation.find_path(Vector2(36, 36), Vector2(244, 36))
+	var second_stats: Dictionary = navigation.get_path_cache_stats()
+	_expect(not first_path.is_empty() and not second_path.is_empty(), "repeated cached routes remain usable")
+	_expect(int(first_stats.get("misses", 0)) == 1, "first route performs one A* search")
+	_expect(int(second_stats.get("hits", 0)) == 1, "same-cell route reuses cached A* result")
+	_expect(int(second_stats.get("size", 0)) == 1, "same-cell route occupies one cache entry")
+
+
 func _new_navigation(data: Dictionary):
 	var navigation = MAP_NAVIGATION_SCRIPT.new()
 	navigation.setup(data)
 	return navigation
+
+
+func _facility_position(map_loader, facility_id: String) -> Vector2:
+	for facility in map_loader.get_facilities():
+		if facility is Dictionary and str(facility.get("id", "")) == facility_id:
+			return _read_vector2(facility.get("position", []))
+	return Vector2.ZERO
+
+
+func _npc_position(map_loader, npc_id: String) -> Vector2:
+	for npc in map_loader.get_npcs():
+		if npc is Dictionary and str(npc.get("id", "")) == npc_id:
+			return _read_vector2(npc.get("position", []))
+	return Vector2.ZERO
 
 
 func _issues_contain(issues: Array, text: String) -> bool:
@@ -205,6 +240,12 @@ func _issues_contain(issues: Array, text: String) -> bool:
 		if str(issue).contains(text):
 			return true
 	return false
+
+
+func _read_vector2(value: Variant) -> Vector2:
+	if value is Array and value.size() >= 2:
+		return Vector2(float(value[0]), float(value[1]))
+	return Vector2.ZERO
 
 
 func _expect(condition: bool, label: String) -> void:

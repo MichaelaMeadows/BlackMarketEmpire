@@ -2,6 +2,8 @@ extends Node2D
 class_name MapLoader
 
 const MAP_NAVIGATION_SCRIPT := preload("res://scripts/map_navigation.gd")
+const MAP_COMPILER := preload("res://scripts/map_compiler.gd")
+const WORLD_ASSETS := preload("res://scripts/visuals/world_asset_catalog.gd")
 const DEFAULT_BACKGROUND := Color(0.06, 0.07, 0.075)
 const DEFAULT_GRID_COLOR := Color(0.10, 0.11, 0.12)
 const DEFAULT_BUILDING_COLOR := Color(0.16, 0.18, 0.19)
@@ -28,6 +30,10 @@ var active_building_id := ""
 var navigation
 var texture_cache: Dictionary = {}
 
+func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+
 func load_map(path: String) -> bool:
 	map_path = path
 	var file := FileAccess.open(path, FileAccess.READ)
@@ -46,7 +52,7 @@ func load_map(path: String) -> bool:
 		queue_redraw()
 		return false
 
-	map_data = parsed
+	map_data = MAP_COMPILER.compile(parsed)
 	texture_cache.clear()
 	_rebuild_navigation()
 	_rebuild_collision()
@@ -156,6 +162,7 @@ func _draw_zone_collection(collection_name: String, fill_fallback: Color) -> voi
 		var material := str(item.get("visual_id", item.get("id", "")))
 		var fill_color: Color = _read_color(item.get("color", []), _zone_material_color(material, fill_fallback))
 		draw_rect(rect, fill_color)
+		_draw_material_texture(rect, material, 0.86)
 		_draw_zone_details(rect, material, fill_color)
 
 
@@ -167,12 +174,13 @@ func _draw_buildings() -> void:
 		var floor_material := str(item.get("floor_material", item.get("visual_id", "worn_floor")))
 		draw_rect(rect.grow(8.0), INTERIOR_SHADOW)
 		draw_rect(rect, _floor_material_color(floor_material, fill_color))
-		_draw_floor_tiles(rect, fill_color.lightened(0.07), fill_color.darkened(0.08))
+		_draw_material_texture(rect, floor_material, 0.92)
 		for room in item.get("rooms", []):
 			var room_rect: Rect2 = _read_rect(room.get("rect", []))
 			var room_color: Color = _read_color(room.get("color", []), _floor_material_color(str(room.get("floor_material", floor_material)), fill_color))
 			draw_rect(room_rect, Color(room_color.r, room_color.g, room_color.b, 0.42))
-			_draw_room_floor_details(room_rect, str(room.get("floor_material", floor_material)), room_color)
+			var room_material := str(room.get("floor_material", floor_material))
+			_draw_material_texture(room_rect, room_material, 0.94)
 			draw_rect(room_rect, trim_color.darkened(0.35), false, 2.0)
 		draw_rect(rect, trim_color, false, float(item.get("outline_width", 3.0)))
 		_draw_building_details(rect, str(item.get("kind", "building")), trim_color)
@@ -296,6 +304,13 @@ func _draw_zone_details(rect: Rect2, material: String, fill_color: Color) -> voi
 		draw_rect(Rect2(Vector2(rect.end.x - 5.0, rect.position.y), Vector2(5.0, rect.size.y)), Color(0.025, 0.028, 0.030, 0.48))
 	elif material.contains("wood") or material.contains("grass"):
 		_draw_pixel_noise(rect, Color(0.16, 0.30, 0.13, 0.22), 84.0, 8.0)
+
+
+func _draw_material_texture(rect: Rect2, material: String, alpha: float = 1.0) -> void:
+	var texture: Texture2D = WORLD_ASSETS.get_surface_texture(material)
+	if texture == null:
+		return
+	draw_texture_rect(texture, rect, true, Color(1.0, 1.0, 1.0, alpha))
 
 
 func _roof_color(kind: String, fill_color: Color, trim_color: Color) -> Color:

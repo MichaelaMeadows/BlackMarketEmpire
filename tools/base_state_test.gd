@@ -34,7 +34,7 @@ func _test_base_state_initializes_from_map() -> void:
 	var summary: Dictionary = _state.get_base_summary()
 	_expect(summary.get("id") == "cypress_house", "base id initializes")
 	_expect(summary.get("tier") == "house", "base tier initializes")
-	_expect(int(summary.get("room_count", 0)) == 5, "base room count initializes")
+	_expect(int(summary.get("room_count", 0)) == 6, "base includes five practical rooms and one expansion room")
 	_expect(int(summary.get("facility_count", 0)) == 5, "base facilities initialize")
 	_expect(_state.get_base_role_limit("transporter") == 5, "starter base allows five transporters")
 	_expect(_state.get_base_role_limit("muscle") == 3, "starter base allows three muscle")

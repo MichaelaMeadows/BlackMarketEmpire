@@ -1,6 +1,8 @@
 extends SceneTree
 
 const MAP_AUTHORING_HELPER := preload("res://tools/map_authoring_helper.gd")
+const MAP_COMPILER := preload("res://scripts/map_compiler.gd")
+const MAP_VALIDATOR := preload("res://scripts/map_validator.gd")
 
 var _failures: int = 0
 
@@ -8,6 +10,8 @@ var _failures: int = 0
 func _init() -> void:
 	_test_building_layout_generates_passable_doors()
 	_test_existing_exterior_wall_signature_still_works()
+	_test_room_connections_generate_coherent_layout()
+	_test_map_compiler_expands_building_layouts()
 
 	if _failures == 0:
 		print("Map authoring helper tests passed.")
@@ -59,6 +63,57 @@ func _test_existing_exterior_wall_signature_still_works() -> void:
 	_expect(walls.size() == 5, "legacy exterior wall call remains valid")
 	_expect(_has_wall_rect(walls, "legacy_south_0", [0.0, 156.0, 70.0, 24.0]), "legacy call keeps configured door start")
 	_expect(_has_wall_rect(walls, "legacy_south_1", [166.0, 156.0, 34.0, 24.0]), "legacy call enforces minimum passage")
+
+
+func _test_room_connections_generate_coherent_layout() -> void:
+	var layout: Dictionary = MAP_AUTHORING_HELPER.building_layout(
+		"connected_shop",
+		Rect2(1000.0, 500.0, 500.0, 300.0),
+		{
+			"door_side": "west",
+			"rooms_are_local": true,
+			"rooms": [
+				{"id": "shop_floor", "rect": [28, 28, 208, 244]},
+				{"id": "shop_office", "rect": [264, 28, 208, 244]},
+			],
+			"room_connections": [
+				{"room_a": "shop_floor", "room_b": "shop_office", "door_width": 112.0},
+			],
+		}
+	)
+	var building: Dictionary = layout["building"]
+	var rooms: Array = building["rooms"]
+	var walls: Array = layout["walls"]
+	_expect(rooms[0].get("rect", []) == [1028.0, 528.0, 208.0, 244.0], "local room coordinates become map coordinates")
+	_expect(_has_wall_rect(walls, "connected_shop_shop_floor_shop_office_0", [1236.0, 528.0, 28.0, 66.0]), "room connection generates first divider segment")
+	_expect(_has_wall_rect(walls, "connected_shop_shop_floor_shop_office_1", [1236.0, 706.0, 28.0, 66.0]), "room connection generates second divider segment around door")
+
+	var map_data := {
+		"schema_version": 2,
+		"id": "connected_layout_test",
+		"name": "Connected Layout Test",
+		"bounds": [900, 400, 700, 500],
+		"player_start": [1100, 650],
+		"buildings": [building],
+		"walls": walls,
+	}
+	var issues: Array[String] = MAP_VALIDATOR.validate(map_data, "", true)
+	_expect(issues.is_empty(), "generated connected building passes structural and navigation validation: %s" % "; ".join(issues))
+
+
+func _test_map_compiler_expands_building_layouts() -> void:
+	var compiled: Dictionary = MAP_COMPILER.compile({
+		"walls": [{"id": "existing_fence", "rect": [0, 0, 10, 100], "collides": true}],
+		"building_layouts": [{
+			"id": "compiled_house",
+			"rect": [100, 100, 400, 300],
+			"rooms_are_local": true,
+			"rooms": [{"id": "compiled_room", "rect": [28, 28, 344, 244]}],
+		}],
+	})
+	_expect(not compiled.has("building_layouts"), "compiler removes authoring-only building layouts")
+	_expect(compiled.get("buildings", []).size() == 1, "compiler emits runtime building records")
+	_expect(compiled.get("walls", []).size() == 6, "compiler preserves existing walls and emits exterior walls")
 
 
 func _has_wall_rect(walls: Array, id: String, rect: Array) -> bool:

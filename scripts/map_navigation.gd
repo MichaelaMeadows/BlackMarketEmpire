@@ -6,6 +6,7 @@ const MAX_NEAREST_CELL_RADIUS := 32
 const DERIVED_COVER_OFFSET := 44.0
 const DOORWAY_SAMPLE_SPACING_FACTOR := 0.5
 const MAX_ROOM_GAP_FACTOR := 3.0
+const MAX_CACHED_PATHS := 256
 
 var map_data: Dictionary = {}
 var bounds := Rect2(-2000.0, -2000.0, 4000.0, 4000.0)
@@ -21,6 +22,10 @@ var _rooms_by_id: Dictionary = {}
 var _doorways: Array = []
 var _room_graph: Dictionary = {}
 var _cell_regions: Dictionary = {}
+var _path_cache: Dictionary = {}
+var _path_cache_order: Array[String] = []
+var _path_cache_hits := 0
+var _path_cache_misses := 0
 
 
 func setup(new_map_data: Dictionary) -> void:
@@ -29,6 +34,7 @@ func setup(new_map_data: Dictionary) -> void:
 	var navigation_data: Dictionary = map_data.get("navigation", {}) if map_data.get("navigation", {}) is Dictionary else {}
 	cell_size = max(8.0, float(navigation_data.get("cell_size", DEFAULT_CELL_SIZE)))
 	grid_size = Vector2i(max(1, int(ceil(bounds.size.x / cell_size))), max(1, int(ceil(bounds.size.y / cell_size))))
+	_clear_path_cache()
 
 	_build_blockers()
 	_configure_astar()
@@ -46,7 +52,7 @@ func find_path(from: Vector2, to: Vector2) -> PackedVector2Array:
 	if from_cell == Vector2i(-1, -1) or to_cell == Vector2i(-1, -1):
 		return result
 
-	var id_path: Array = astar.get_id_path(from_cell, to_cell)
+	var id_path: Array = _get_cached_id_path(from_cell, to_cell)
 	if id_path.is_empty():
 		if from.distance_to(to_position) <= cell_size:
 			result.append(to_position)
@@ -201,6 +207,36 @@ func find_room_path(from_room_id: String, to_room_id: String) -> Array[String]:
 				return result
 			frontier.append(neighbor_id)
 	return result
+
+
+func get_path_cache_stats() -> Dictionary:
+	return {
+		"size": _path_cache.size(),
+		"hits": _path_cache_hits,
+		"misses": _path_cache_misses,
+	}
+
+
+func _get_cached_id_path(from_cell: Vector2i, to_cell: Vector2i) -> Array:
+	var key := "%d,%d>%d,%d" % [from_cell.x, from_cell.y, to_cell.x, to_cell.y]
+	if _path_cache.has(key):
+		_path_cache_hits += 1
+		return (_path_cache[key] as Array).duplicate()
+	_path_cache_misses += 1
+	var id_path: Array = astar.get_id_path(from_cell, to_cell)
+	_path_cache[key] = id_path.duplicate()
+	_path_cache_order.append(key)
+	if _path_cache_order.size() > MAX_CACHED_PATHS:
+		var oldest_key: String = _path_cache_order.pop_front()
+		_path_cache.erase(oldest_key)
+	return id_path
+
+
+func _clear_path_cache() -> void:
+	_path_cache.clear()
+	_path_cache_order.clear()
+	_path_cache_hits = 0
+	_path_cache_misses = 0
 
 
 func get_region_id(position: Vector2) -> int:
@@ -377,14 +413,6 @@ func _build_room_graph() -> void:
 		if str(doorway.get("kind", "")) != "interior":
 			continue
 		_connect_room_ids(str(doorway.get("room_a", "")), str(doorway.get("room_b", "")))
-
-	for first_index in range(_rooms.size()):
-		for second_index in range(first_index + 1, _rooms.size()):
-			var first: Dictionary = _rooms[first_index]
-			var second: Dictionary = _rooms[second_index]
-			if int(first.get("region_id", -1)) < 0 or int(first.get("region_id", -1)) != int(second.get("region_id", -2)):
-				continue
-			_connect_room_ids(str(first.get("id", "")), str(second.get("id", "")))
 
 
 func _connect_room_ids(first_id: String, second_id: String) -> void:

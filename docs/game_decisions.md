@@ -59,6 +59,7 @@ This is deliberately small. It exists to prove input, state, interaction, and HU
 - The in-game phone is the main expandable player interface. The base-first loop emphasizes Base, Crew, Raids, Map, Bank, and Market apps.
 - The phone Map app must render from the same active map data as the playable world rather than maintaining a separate minimap layout.
 - The market simulation should stay abstract and fictionalized. Goods, recipes, consumer segments, districts, and trade routes live in JSON under `data/economy/` so price movement creates strategic signals without becoming real-world instruction.
+- Trade source availability, order/trip lifecycle, inventory reservations, manifests, and transporter dispatch live in `TradeState`. `GameState` remains the stable facade that supplies cross-domain context, emits global state changes, and forwards progression effects; world movement must report transitions through that facade rather than mutate trade records directly.
 - Local markets advance in daily ticks: anchor supply, production, consumer demand, route trade, price recalculation, trend updates, and habit/desire updates.
 - Progression rules live in JSON under `data/progression/` and should consume generic events/metrics instead of being hardcoded into individual gameplay systems.
 - Character health and weapons are component-style scripts. Keep combat simple and data-driven until there is a clear need for richer AI or weapon inheritance.

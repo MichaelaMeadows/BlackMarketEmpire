@@ -26,7 +26,9 @@ func _test_home_to_raid_to_home_data_flow() -> void:
 	_expect(map_loader.load_map(HOME_MAP_PATH), "home map loads")
 	state.initialize_base_from_map(map_loader.get_map_data())
 	_expect(map_loader.get_title() == "Cypress House", "home map title resolves")
-	_expect(map_loader.get_player_start() == Vector2(-300.0, 120.0), "home player start resolves")
+	var home_start := map_loader.get_player_start()
+	_expect(map_loader.get_navigation().is_walkable(home_start), "home player start is walkable")
+	_expect(map_loader.get_navigation().get_room_id_at(home_start) == "bedroom", "home player starts in the bedroom")
 	_expect(state.get_base_summary().get("id") == "cypress_house", "home map initializes base state")
 
 	var join_result: Dictionary = state.start_raid("abandoned_depot", true)

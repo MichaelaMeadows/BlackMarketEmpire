@@ -7,14 +7,29 @@ signal return_home_requested
 signal trade_order_requested(order_type: String, good_id: String, quantity: int)
 
 const PHONE_MAP_VIEW_SCRIPT := preload("res://scripts/phone_map_view.gd")
-const PHONE_BG := Color(0.045, 0.050, 0.048, 1.0)
-const PHONE_PANEL_BG := Color(0.070, 0.076, 0.072, 1.0)
-const PHONE_PANEL_BORDER := Color(0.18, 0.20, 0.18, 1.0)
-const PHONE_TEXT_MUTED := Color(0.70, 0.76, 0.72, 1.0)
+const UI_TOKENS := preload("res://scripts/ui/ui_tokens.gd")
+const UI_THEME := preload("res://scripts/ui/ui_theme.gd")
+const UI := preload("res://scripts/ui/ui_factory.gd")
+const VISUAL_ASSETS := preload("res://scripts/ui/visual_asset_catalog.gd")
+const PHONE_BG := UI_TOKENS.ASPHALT
+const PHONE_PANEL_BG := UI_TOKENS.STEEL
+const PHONE_PANEL_BORDER := UI_TOKENS.RULE
+const PHONE_TEXT_MUTED := UI_TOKENS.DUST
+const APP_ICONS := {
+	"base": preload("res://assets/ui/icons/nav_base.png"),
+	"crew": preload("res://assets/ui/icons/nav_crew.png"),
+	"raids": preload("res://assets/ui/icons/nav_raids.png"),
+	"map": preload("res://assets/ui/icons/nav_map.png"),
+	"bank": preload("res://assets/ui/icons/nav_bank.png"),
+	"market": preload("res://assets/ui/icons/nav_market.png"),
+	"orders": preload("res://assets/ui/icons/nav_orders.png"),
+	"hire": preload("res://assets/ui/icons/nav_hire.png"),
+}
 
 var map_loader
 var player
 var current_app := "base"
+var app_buttons: Dictionary = {}
 var phone_root: Control
 var title_label: Label
 var app_content: VBoxContainer
@@ -78,11 +93,12 @@ func _process(delta: float) -> void:
 func _build_ui() -> void:
 	phone_root = Control.new()
 	phone_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	phone_root.theme = UI_THEME.create()
 	add_child(phone_root)
 
 	var shade := ColorRect.new()
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	shade.color = Color(0.0, 0.0, 0.0, 0.74)
+	shade.color = Color(UI_TOKENS.INK, 0.82)
 	phone_root.add_child(shade)
 
 	var phone := PanelContainer.new()
@@ -90,7 +106,7 @@ func _build_ui() -> void:
 	phone.anchor_top = 0.04
 	phone.anchor_right = 0.97
 	phone.anchor_bottom = 0.96
-	phone.add_theme_stylebox_override("panel", _make_panel_style(PHONE_BG, Color(0.30, 0.33, 0.30, 1.0), 2, 0))
+	phone.add_theme_stylebox_override("panel", UI_THEME.panel_style(PHONE_BG, UI_TOKENS.RULE, 2, UI_TOKENS.CORNER_MODAL, 0))
 	phone_root.add_child(phone)
 
 	var phone_margin := MarginContainer.new()
@@ -116,9 +132,7 @@ func _build_ui() -> void:
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title_label)
 
-	var close_button := Button.new()
-	close_button.text = "Tab"
-	close_button.tooltip_text = "Close phone"
+	var close_button := UI.button("Tab", "Close phone")
 	close_button.pressed.connect(toggle)
 	header.add_child(close_button)
 
@@ -145,15 +159,22 @@ func _build_ui() -> void:
 
 
 func _add_app_button(parent: HBoxContainer, label: String, app_id: String) -> void:
-	var button := Button.new()
-	button.text = label
+	var button := UI.button(label, "Open %s" % label)
+	button.icon = APP_ICONS.get(app_id)
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	button.toggle_mode = true
+	button.button_pressed = app_id == current_app
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.pressed.connect(_show_app.bind(app_id))
 	parent.add_child(button)
+	app_buttons[app_id] = button
 
 
 func _show_app(app_id: String) -> void:
 	current_app = app_id
+	for button_id in app_buttons:
+		var app_button: Button = app_buttons[button_id]
+		app_button.set_pressed_no_signal(button_id == app_id)
 	if app_id != "raids":
 		selected_raid_target_id = ""
 		selected_raid_crew_ids.clear()
@@ -795,7 +816,7 @@ func _on_hire_role_filter_selected(index: int, role_filter: OptionButton) -> voi
 
 func _add_order_row(row: Dictionary) -> void:
 	_add_order_grid_cell(str(row.get("direction", "Order")), 90.0, true)
-	_add_order_grid_cell(str(row.get("good_name", "Product")), 160.0, true)
+	_add_good_grid_cell(orders_list, str(row.get("good_id", "")), str(row.get("good_name", "Product")), 160.0)
 	_add_order_grid_cell(str(row.get("status", "Queued")), 160.0)
 	_add_order_grid_cell("%d units\n%d KG trip" % [
 		int(row.get("quantity", 0)),
@@ -967,7 +988,7 @@ func _add_trade_row(item: Dictionary) -> void:
 	var good_id := str(item.get("id", ""))
 	var price: int = int(item.get("buy_price", 0)) if market_mode == "buy" else int(item.get("sell_price", 0))
 	var unit_weight: int = int(item.get("unit_weight_kg", 1))
-	_add_market_grid_cell(str(item.get("name", "Product")), 180.0, true)
+	_add_good_grid_cell(market_list, good_id, str(item.get("name", "Product")), 180.0)
 	_add_market_grid_cell(str(item.get("legality_label", "Unknown")), 100.0)
 	_add_market_grid_cell("$%d" % price, 90.0)
 	_add_market_grid_cell("%d KG/unit" % unit_weight, 90.0)
@@ -1065,6 +1086,31 @@ func _add_market_grid_cell(text: String, width: float, primary: bool = false) ->
 	market_list.add_child(label)
 
 
+func _add_good_grid_cell(grid: GridContainer, good_id: String, good_name: String, width: float) -> void:
+	var cell := HBoxContainer.new()
+	cell.custom_minimum_size = Vector2(width, 44.0)
+	cell.add_theme_constant_override("separation", UI_TOKENS.SPACE_2)
+	grid.add_child(cell)
+
+	var icon := TextureRect.new()
+	icon.texture = VISUAL_ASSETS.get_good_icon(good_id)
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.custom_minimum_size = Vector2(32.0, 32.0)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.tooltip_text = "%s icon" % good_name
+	cell.add_child(icon)
+
+	var label := Label.new()
+	label.text = good_name
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.add_theme_font_size_override("font_size", 16)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cell.add_child(label)
+
+
 func _add_market_stat(parent: HBoxContainer, label_text: String, value_text: String) -> void:
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1095,12 +1141,7 @@ func _add_market_stat(parent: HBoxContainer, label_text: String, value_text: Str
 
 
 func _make_panel_style(bg_color: Color, border_color: Color, border_width: int = 1, corner_radius: int = 0) -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = bg_color
-	style.border_color = border_color
-	style.set_border_width_all(border_width)
-	style.set_corner_radius_all(corner_radius)
-	return style
+	return UI_THEME.panel_style(bg_color, border_color, border_width, corner_radius, 0)
 
 
 func _refresh_current_base_app() -> void:
@@ -1229,9 +1270,7 @@ func _format_health(crew_member: Dictionary) -> String:
 
 
 func _add_info_label(text: String, font_size: int = 16) -> Label:
-	var label := Label.new()
-	label.text = text
+	var label := UI.label(text)
 	label.add_theme_font_size_override("font_size", font_size)
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	app_content.add_child(label)
 	return label

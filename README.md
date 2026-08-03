@@ -37,6 +37,10 @@ The phone's Map app reads from the same loaded map data as the playable world, s
 
 Enterable buildings should use `buildings` as floor/outline data with `collides: false`, then use `walls` for exterior walls, doors, and room dividers. `tools/map_authoring_helper.gd` has small static helpers for generating exterior wall records with door gaps, room dividers, and trees.
 
+New maps can instead declare `building_layouts`. These accept local room rectangles (`rooms_are_local: true`) and `room_connections`; `MapCompiler` expands them into the existing runtime `buildings` and `walls` records when the map loads. A connection generates the separating wall and a clearance-safe centered doorway, so room geometry and door geometry come from the same definition. `maps/raid_abandoned_depot.json` is the working example.
+
+`MapValidator` checks map identity and geometry, duplicate IDs, room containment, facility-to-room/slot references, raid map paths, walkability, inferred doorways, and room reachability. The test suite validates every shipped map; schema-version 2 maps receive strict navigation validation, while the schema-version 1 neighborhood remains legacy reference content.
+
 NPC map entries can include `health`, `faction`, optional `weapon` data, and optional `ai` data. Weapons support `weapon_type`, damage/projectile timing, `accuracy`, movement/recoil spread, magazines/reload, bursts, multi-projectile shots, and effective/preferred ranges. AI data can opt a unit into combat behavior with `enabled`, `hostile_factions`, `role`, `detection_radius`, weapon range overrides, reaction/memory timing, cover/suppression settings, squad settings, and follow settings that can be assigned at runtime.
 
 Base maps can include a `base` dictionary, room `slot_ids`, `facilities`, staff NPCs, and `raid_targets`. The Base, Crew, and Raids phone apps read that data through `GameState`. The starter house stores 20 KG, pays unemployment benefits weekly, and starts with Benji as a $10/week runner who can take simple transport assignments.

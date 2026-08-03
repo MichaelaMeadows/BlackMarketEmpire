@@ -24,9 +24,16 @@ try {
         Write-Host ""
         Write-Host "==> Running $relativePath"
         & $GodotCommand --headless --log-file $logPath --script $relativePath
-        if ($LASTEXITCODE -ne 0) {
+        $godotExitCode = $LASTEXITCODE
+        $logText = Get-Content -Raw -Path $logPath -ErrorAction SilentlyContinue
+        $hasScriptError = $logText -match "(?m)^SCRIPT ERROR:"
+        $hasFailedExpectation = $logText -match "(?m)^ERROR: (FAIL:|.*tests failed)"
+        if ($godotExitCode -ne 0 -or $hasScriptError -or $hasFailedExpectation) {
             Write-Error "Test failed: $relativePath"
-            exit $LASTEXITCODE
+            if ($godotExitCode -ne 0) {
+                exit $godotExitCode
+            }
+            exit 1
         }
     }
 }

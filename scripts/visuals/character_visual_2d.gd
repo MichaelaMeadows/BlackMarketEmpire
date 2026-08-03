@@ -2,6 +2,7 @@ extends AnimatedSprite2D
 class_name CharacterVisual2D
 
 const FRAME_SIZE := 48
+const PLAYER_SHEET := preload("res://assets/sprites/characters/player_streetwear.png")
 const TRANSPARENT := Color(0.0, 0.0, 0.0, 0.0)
 const OUTLINE := Color(0.025, 0.030, 0.034, 1.0)
 const SHADOW := Color(0.0, 0.0, 0.0, 0.34)
@@ -104,6 +105,8 @@ func _direction_suffix(direction: Vector2) -> String:
 
 
 func _build_sprite_frames() -> SpriteFrames:
+	if visual_id == "player":
+		return _build_player_sprite_frames()
 	var frames := SpriteFrames.new()
 	frames.remove_animation("default")
 	for action in ["idle", "walk", "aim", "fire", "hurt", "death"]:
@@ -117,6 +120,32 @@ func _build_sprite_frames() -> SpriteFrames:
 				frame_count = 1
 			for frame_index in range(frame_count):
 				frames.add_frame(animation_name, _make_frame(action, direction, frame_index))
+	return frames
+
+
+func _build_player_sprite_frames() -> SpriteFrames:
+	var frames := SpriteFrames.new()
+	frames.remove_animation("default")
+	var action_columns := {
+		"idle": [0, 1],
+		"walk": [2, 3, 4, 5],
+		"aim": [6, 7],
+		"fire": [8, 9],
+		"hurt": [10],
+		"death": [11],
+	}
+	var direction_rows := {"down": 0, "up": 1, "side": 2}
+	for action in action_columns:
+		for direction in direction_rows:
+			var animation_name := "%s_%s" % [action, direction]
+			frames.add_animation(animation_name)
+			frames.set_animation_speed(animation_name, 8.0 if action == "walk" else (10.0 if action == "fire" else 4.0))
+			frames.set_animation_loop(animation_name, action not in ["fire", "death"])
+			for column in action_columns[action]:
+				var frame := AtlasTexture.new()
+				frame.atlas = PLAYER_SHEET
+				frame.region = Rect2(column * FRAME_SIZE, direction_rows[direction] * FRAME_SIZE, FRAME_SIZE, FRAME_SIZE)
+				frames.add_frame(animation_name, frame)
 	return frames
 
 
