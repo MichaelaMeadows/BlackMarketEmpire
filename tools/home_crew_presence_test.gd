@@ -15,6 +15,7 @@ func _run() -> void:
 	await process_frame
 	await process_frame
 
+	await _test_sent_raid_waits_for_crew_to_leave(main)
 	_test_hired_crew_walks_onto_home_map(main)
 	await _test_two_hired_thugs_enable_enemy_thug_attack(main)
 
@@ -25,6 +26,43 @@ func _run() -> void:
 	else:
 		push_error("Home crew presence tests failed: %d failure(s)." % _failures)
 	quit(_failures)
+
+
+func _test_sent_raid_waits_for_crew_to_leave(main) -> void:
+	var state = main.game_state
+	var benji = main._find_spawned_npc_by_id("benji_runner")
+	_expect(benji != null, "starter crew is present before sent raid")
+	if benji == null:
+		return
+	benji.apply_damage(10)
+	var wounded_benji: Dictionary = _find_crew_member(state.get_crew_roster(), "benji_runner")
+	_expect(int(wounded_benji.get("health", 0)) == int(wounded_benji.get("max_health", 0)) - 10, "home crew damage persists to roster health")
+
+	main._on_raid_send_requested("abandoned_depot", ["benji_runner"])
+	_expect(str(state.get_active_raid_target().get("mode", "")) == "departing", "sent raid starts as a departure")
+	_expect(main.active_raid_departures.has("benji_runner"), "sent raid tracks crew walking to exit")
+	_expect(main.active_sent_raid_seconds <= 0.0, "sent raid timer waits for crew to leave map")
+
+	for _index in range(240):
+		main._process(0.1)
+		await process_frame
+		if str(state.get_active_raid_target().get("mode", "")) == "sent":
+			break
+
+	_expect(str(state.get_active_raid_target().get("mode", "")) == "sent", "sent raid starts after crew leaves map")
+	_expect(main._find_spawned_npc_by_id("benji_runner") == null, "departed crew is removed from the home map")
+	_expect(main.active_sent_raid_seconds > 0.0, "sent raid timer starts after departure")
+
+	for _index in range(80):
+		main._process(0.1)
+		await process_frame
+		if state.get_active_raid_target().is_empty():
+			break
+	await process_frame
+
+	_expect(state.get_active_raid_target().is_empty(), "sent raid completes after departure")
+	_expect(state.get_ready_crew_count() == 1, "sent raid survivor returns to ready crew")
+	_expect(main._find_spawned_npc_by_id("benji_runner") != null, "sent raid survivor returns to the home map")
 
 
 func _test_hired_crew_walks_onto_home_map(main) -> void:
@@ -97,6 +135,13 @@ func _find_first_rival(main):
 		if is_instance_valid(npc) and npc.has_method("get_faction") and str(npc.get_faction()) == "rival":
 			return npc
 	return null
+
+
+func _find_crew_member(roster: Array, crew_id: String) -> Dictionary:
+	for crew_member in roster:
+		if crew_member is Dictionary and str(crew_member.get("id", "")) == crew_id:
+			return crew_member
+	return {}
 
 
 func _expect(condition: bool, label: String) -> void:

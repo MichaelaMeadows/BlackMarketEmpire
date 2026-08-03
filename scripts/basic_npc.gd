@@ -1,5 +1,6 @@
 extends CharacterBody2D
 
+signal health_changed(npc: CharacterBody2D, current_health: int, max_health: int)
 signal died(npc: CharacterBody2D)
 
 const CHARACTER_VISUAL_PATH := "res://scripts/visuals/character_visual_2d.gd"
@@ -79,7 +80,12 @@ func setup(npc_data: Dictionary) -> void:
 		add_child(health)
 		health.health_changed.connect(_on_health_changed)
 		health.died.connect(_on_died)
-	health.setup(int(npc_data.get("health", 60)))
+	var configured_max_health := int(npc_data.get("max_health", npc_data.get("health", 60)))
+	var configured_current_health := int(npc_data.get("health", configured_max_health))
+	if health.has_method("setup_values"):
+		health.setup_values(configured_current_health, configured_max_health)
+	else:
+		health.setup(configured_max_health)
 
 	if not ranged_weapon_enabled:
 		_remove_gun()
@@ -110,6 +116,15 @@ func setup(npc_data: Dictionary) -> void:
 func apply_damage(amount: int) -> void:
 	if health != null:
 		health.apply_damage(amount)
+
+
+func set_health_values(current_health: int, max_health: int) -> void:
+	if health == null:
+		return
+	if health.has_method("setup_values"):
+		health.setup_values(current_health, max_health)
+	else:
+		health.setup(max_health)
 
 
 func notify_attacked_by(attacker: Node) -> void:
@@ -180,7 +195,8 @@ func _instantiate_component_scene(scene_path: String, required_methods: Array = 
 	return component
 
 
-func _on_health_changed(_current_health: int, _max_health: int) -> void:
+func _on_health_changed(current_health: int, max_health: int) -> void:
+	health_changed.emit(self, current_health, max_health)
 	_update_visual()
 
 

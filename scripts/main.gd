@@ -11,6 +11,8 @@ const HOME_MAP_PATH := "res://maps/starter_house.json"
 const DEFAULT_MAP_PATH := HOME_MAP_PATH
 const RUNNER_TRAVEL_SPEED := 120.0
 const RUNNER_AWAY_SECONDS := 4.0
+const SENT_RAID_FALLBACK_SECONDS := 3.0
+const RAID_DEPARTURE_SPEED := 125.0
 const CREW_ARRIVAL_SPEED := 105.0
 const ENEMY_THUG_NAMES := ["Rook", "Mack", "Vince", "Doyle", "Kane", "Rafe"]
 
@@ -20,6 +22,7 @@ var map_loader
 var phone_ui
 var game_state
 var hud_label: Label
+var clock_label: Label
 var ammo_label: Label
 var reload_button: Button
 var prompt_label: Label
@@ -30,6 +33,9 @@ var spawned_npcs: Array = []
 var spawned_contacts: Array = []
 var active_runner_jobs: Dictionary = {}
 var active_crew_arrivals: Dictionary = {}
+var active_raid_departure: Dictionary = {}
+var active_raid_departures: Dictionary = {}
+var active_sent_raid_seconds := 0.0
 var active_map_path := ""
 var home_map_path := HOME_MAP_PATH
 var next_enemy_attack_id := 1
@@ -71,9 +77,14 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	var time_result: Dictionary = game_state.advance_game_time(delta)
+	if bool(time_result.get("clock_changed", false)):
+		_refresh_hud()
 	if map_loader != null and player != null:
 		map_loader.set_player_position(player.position)
 		_refresh_occluded_actor_visibility()
+	_update_raid_departures(delta)
+	_update_sent_raid(delta)
 	_update_crew_arrivals(delta)
 	_update_runner_jobs(delta)
 	_refresh_ammo_hud()
@@ -127,6 +138,8 @@ func _clear_gameplay_map() -> void:
 	spawned_npcs.clear()
 	active_runner_jobs.clear()
 	active_crew_arrivals.clear()
+	active_raid_departures.clear()
+	active_raid_departure.clear()
 
 	if player != null and is_instance_valid(player):
 		player.queue_free()
@@ -141,6 +154,10 @@ func _spawn_player() -> void:
 	player = PLAYER_SCENE.instantiate()
 	player.position = map_loader.get_player_start()
 	add_child(player)
+	var player_health: Dictionary = game_state.get_player_health()
+	if player.has_method("set_health_values"):
+		player.set_health_values(int(player_health.get("health", 100)), int(player_health.get("max_health", 100)))
+	player.health_changed.connect(_on_player_health_changed)
 
 	var camera := Camera2D.new()
 	camera.position_smoothing_enabled = true
@@ -177,6 +194,8 @@ func _spawn_npc_from_data(data: Dictionary, position_override: Variant = null):
 	npc.set_meta("crew_id", str(data.get("crew_id", data.get("id", ""))))
 	add_child(npc)
 	spawned_npcs.append(npc)
+	if npc.has_signal("health_changed"):
+		npc.health_changed.connect(_on_npc_health_changed)
 	npc.died.connect(_on_npc_died)
 	_configure_npc_navigation(npc)
 	_configure_player_crew_follow(npc)
@@ -198,6 +217,7 @@ func _crew_member_to_npc_data(crew_member: Dictionary, position: Vector2) -> Dic
 		"visual_id": str(crew_member.get("visual_id", "crew_jacket")),
 		"position": [position.x, position.y],
 		"health": int(crew_member.get("health", 60)),
+		"max_health": int(crew_member.get("max_health", crew_member.get("health", 60))),
 		"color": crew_member.get("color", [0.28, 0.68, 0.62]),
 	}
 	if crew_member.has("ranged_weapon"):
@@ -240,6 +260,7 @@ func _spawn_raid_crew() -> void:
 			"faction": "player_crew",
 			"visual_id": str(crew_member.get("visual_id", "crew_jacket")),
 			"health": int(crew_member.get("health", 80)),
+			"max_health": int(crew_member.get("max_health", crew_member.get("health", 80))),
 			"color": crew_member.get("color", [0.28, 0.68, 0.62]),
 			"ai": {
 				"enabled": true,
@@ -270,6 +291,7 @@ func _build_phone() -> void:
 	phone_ui.setup(map_loader, player)
 	phone_ui.phone_visibility_changed.connect(_on_phone_visibility_changed)
 	phone_ui.raid_join_requested.connect(_on_raid_join_requested)
+	phone_ui.raid_send_requested.connect(_on_raid_send_requested)
 	phone_ui.return_home_requested.connect(_on_return_home_requested)
 	phone_ui.trade_order_requested.connect(_on_trade_order_requested)
 
@@ -277,6 +299,20 @@ func _build_phone() -> void:
 func _build_hud() -> void:
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
+
+	clock_label = Label.new()
+	clock_label.anchor_left = 1.0
+	clock_label.anchor_top = 0.0
+	clock_label.anchor_right = 1.0
+	clock_label.anchor_bottom = 0.0
+	clock_label.offset_left = -180.0
+	clock_label.offset_top = 16.0
+	clock_label.offset_right = -18.0
+	clock_label.offset_bottom = 42.0
+	clock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	clock_label.add_theme_font_size_override("font_size", 15)
+	clock_label.modulate = Color(0.88, 0.93, 0.90, 0.86)
+	canvas.add_child(clock_label)
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -384,14 +420,19 @@ func _place_trade_order(order_type: String, good_id: String = "", quantity: int 
 func _refresh_hud() -> void:
 	if hud_label == null or scope_label == null:
 		return
+	if clock_label != null:
+		clock_label.text = game_state.get_clock_label()
 	var base_summary: Dictionary = game_state.get_base_summary()
-	hud_label.text = "Base: %s    Cash: $%d    Inventory: %d/%d KG    Heat: %d%%    Crew: %d" % [
+	var player_health: Dictionary = game_state.get_player_health()
+	hud_label.text = "Base: %s    Cash: $%d    Inventory: %d/%d KG    Heat: %d%%    Crew: %d    HP: %d/%d" % [
 		str(base_summary.get("name", "No Base")),
 		game_state.cash,
 		game_state.get_storage_used(),
 		game_state.get_storage_capacity(),
 		game_state.heat,
 		game_state.get_ready_crew_count(),
+		int(player_health.get("health", 100)),
+		int(player_health.get("max_health", 100)),
 	]
 	if _is_home_map():
 		scope_label.text = "%s tier. Next base: %s." % [
@@ -422,6 +463,20 @@ func _set_status(message: String) -> void:
 		status_label.text = message
 
 
+func _on_player_health_changed(current_health: int, max_health: int) -> void:
+	game_state.set_player_health(current_health, max_health)
+	_refresh_hud()
+
+
+func _on_npc_health_changed(npc: CharacterBody2D, current_health: int, max_health: int) -> void:
+	if npc == null or not npc.has_method("get_faction") or str(npc.get_faction()) != "player_crew":
+		return
+	var crew_id := str(npc.get_meta("crew_id", npc.get_meta("npc_id", "")))
+	if crew_id == "":
+		return
+	game_state.set_crew_health(crew_id, current_health, max_health)
+
+
 func _on_npc_died(npc: CharacterBody2D) -> void:
 	var faction := ""
 	if npc != null and npc.has_method("get_faction"):
@@ -430,15 +485,18 @@ func _on_npc_died(npc: CharacterBody2D) -> void:
 		var crew_id := str(npc.get_meta("crew_id", npc.get_meta("npc_id", "")))
 		active_runner_jobs.erase(crew_id)
 		active_runner_jobs.erase(str(npc.get_meta("npc_id", "")))
+		active_raid_departures.erase(crew_id)
 		var result: Dictionary = game_state.remove_crew_member(crew_id)
 		_set_status(str(result.get("message", "Crew member died.")))
 		_refresh_hud()
+		_complete_raid_departure_if_ready()
 		return
 	game_state.record_kill("npc")
 
 
 func _on_game_state_changed() -> void:
 	_refresh_hud()
+	_sync_player_health_from_state()
 	if _is_home_map():
 		call_deferred("_sync_home_crew_visuals")
 
@@ -491,10 +549,13 @@ func _sync_home_crew_visuals() -> void:
 			continue
 		var crew_id := str(npc.get_meta("crew_id", npc.get_meta("npc_id", "")))
 		var crew_member: Dictionary = crew_by_id.get(crew_id, {})
-		if crew_member.is_empty() or (not _should_show_home_crew(crew_member) and not active_runner_jobs.has(crew_id)):
+		if crew_member.is_empty() or (not _should_show_home_crew(crew_member) and not active_runner_jobs.has(crew_id) and not active_raid_departures.has(crew_id)):
 			active_crew_arrivals.erase(crew_id)
 			npc.queue_free()
 			spawned_npcs.remove_at(index)
+			continue
+		if npc.has_method("set_health_values"):
+			npc.set_health_values(int(crew_member.get("health", 60)), int(crew_member.get("max_health", crew_member.get("health", 60))))
 
 	for roster_index in range(roster.size()):
 		var crew_member: Variant = roster[roster_index]
@@ -506,6 +567,18 @@ func _sync_home_crew_visuals() -> void:
 		if crew_id == "" or _find_spawned_npc_by_id(crew_id) != null:
 			continue
 		_spawn_home_crew_member(crew_member, _get_crew_idle_position(crew_member, roster_index))
+
+
+func _sync_player_health_from_state() -> void:
+	if player == null or not player.has_method("set_health_values") or player.get("health") == null:
+		return
+	var player_health: Dictionary = game_state.get_player_health()
+	var health_component = player.get("health")
+	var current_health := int(player_health.get("health", 100))
+	var max_health := int(player_health.get("max_health", 100))
+	if int(health_component.get("current_health")) == current_health and int(health_component.get("max_health")) == max_health:
+		return
+	player.set_health_values(current_health, max_health)
 
 
 func _should_show_home_crew(crew_member: Dictionary) -> bool:
@@ -568,6 +641,70 @@ func return_home() -> void:
 		var result: Dictionary = game_state.complete_active_raid(true)
 		_set_status(str(result.get("message", "Returned home.")))
 	_load_gameplay_map(home_map_path)
+
+
+func _start_raid_departure(target_id: String, crew_ids: Array) -> void:
+	active_raid_departure = {
+		"target_id": target_id,
+		"crew_ids": crew_ids.duplicate(),
+		"departed_ids": [],
+	}
+	active_raid_departures.clear()
+	for value in crew_ids:
+		var crew_id := str(value)
+		var npc = _find_spawned_npc_by_id(crew_id)
+		if npc == null:
+			continue
+		active_raid_departures[crew_id] = {
+			"exit_position": _get_exit_position(npc.position),
+		}
+	_complete_raid_departure_if_ready()
+
+
+func _update_raid_departures(delta: float) -> void:
+	if active_raid_departures.is_empty():
+		return
+	for crew_id in active_raid_departures.keys():
+		if not active_raid_departures.has(crew_id):
+			continue
+		var job: Dictionary = active_raid_departures[crew_id]
+		var npc = _find_spawned_npc_by_id(str(crew_id))
+		if npc == null:
+			active_raid_departures.erase(crew_id)
+			continue
+		var exit_position: Vector2 = job.get("exit_position", npc.position)
+		if NAVIGATION_MOVER_SCRIPT.move_towards(npc, exit_position, RAID_DEPARTURE_SPEED, delta, _get_navigation()):
+			var departed_ids: Array = active_raid_departure.get("departed_ids", [])
+			departed_ids.append(str(crew_id))
+			active_raid_departure["departed_ids"] = departed_ids
+			active_raid_departures.erase(crew_id)
+			_remove_spawned_npc(npc)
+	_complete_raid_departure_if_ready()
+
+
+func _complete_raid_departure_if_ready() -> void:
+	if active_raid_departure.is_empty() or not active_raid_departures.is_empty():
+		return
+	var departed_ids: Array = active_raid_departure.get("departed_ids", [])
+	active_raid_departure.clear()
+	var result: Dictionary = game_state.begin_sent_raid(departed_ids)
+	_set_status(str(result.get("message", "Raid party departed.")))
+	if bool(result.get("ok", false)):
+		active_sent_raid_seconds = float(result.get("duration_seconds", SENT_RAID_FALLBACK_SECONDS))
+
+
+func _update_sent_raid(delta: float) -> void:
+	if active_sent_raid_seconds <= 0.0:
+		return
+	active_sent_raid_seconds -= delta
+	if active_sent_raid_seconds > 0.0:
+		return
+	active_sent_raid_seconds = 0.0
+	var active_raid: Dictionary = game_state.get_active_raid_target()
+	if active_raid.is_empty() or str(active_raid.get("mode", "")) != "sent":
+		return
+	var result: Dictionary = game_state.complete_active_raid(true)
+	_set_status(str(result.get("message", "Raid complete.")))
 
 
 func trigger_random_enemy_thug_attack(seed: int = -1) -> Dictionary:
@@ -650,6 +787,14 @@ func _on_raid_join_requested(target_id: String) -> void:
 	join_raid(target_id)
 	if phone_ui != null and phone_ui.is_open():
 		phone_ui.toggle()
+
+
+func _on_raid_send_requested(target_id: String, crew_ids: Array) -> void:
+	var result: Dictionary = game_state.send_raid(target_id, crew_ids)
+	_set_status(str(result.get("message", "Raid order updated.")))
+	if bool(result.get("ok", false)):
+		active_sent_raid_seconds = 0.0
+		_start_raid_departure(target_id, crew_ids)
 
 
 func _on_return_home_requested() -> void:
@@ -835,6 +980,17 @@ func _find_spawned_npc_by_id(npc_id: String):
 		if str(npc.get_meta("npc_id", "")) == npc_id or str(npc.get_meta("crew_id", "")) == npc_id:
 			return npc
 	return null
+
+
+func _remove_spawned_npc(npc: Node) -> void:
+	if npc == null:
+		return
+	for index in range(spawned_npcs.size() - 1, -1, -1):
+		if spawned_npcs[index] == npc:
+			spawned_npcs.remove_at(index)
+			break
+	if is_instance_valid(npc):
+		npc.queue_free()
 
 
 func _get_roster_index(crew_id: String) -> int:

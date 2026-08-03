@@ -112,6 +112,16 @@ func apply_damage(amount: int) -> void:
 		health.apply_damage(amount)
 
 
+func set_health_values(current_health: int, current_max_health: int) -> void:
+	max_health = max(1, current_max_health)
+	if health == null:
+		return
+	if health.has_method("setup_values"):
+		health.setup_values(current_health, max_health)
+	else:
+		health.setup(max_health)
+
+
 func get_faction() -> String:
 	return faction
 

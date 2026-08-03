@@ -2,6 +2,7 @@ extends CanvasLayer
 
 signal phone_visibility_changed(is_open: bool)
 signal raid_join_requested(target_id: String)
+signal raid_send_requested(target_id: String, crew_ids: Array)
 signal return_home_requested
 signal trade_order_requested(order_type: String, good_id: String, quantity: int)
 
@@ -29,7 +30,10 @@ var orders_refresh_timer := 0.0
 var hire_list: GridContainer
 var hire_status_label: Label
 var hire_message := ""
+var hire_role_filter := "all"
 var raid_status_label: Label
+var selected_raid_target_id := ""
+var selected_raid_crew_ids: Dictionary = {}
 var game_state
 
 func _ready() -> void:
@@ -150,6 +154,9 @@ func _add_app_button(parent: HBoxContainer, label: String, app_id: String) -> vo
 
 func _show_app(app_id: String) -> void:
 	current_app = app_id
+	if app_id != "raids":
+		selected_raid_target_id = ""
+		selected_raid_crew_ids.clear()
 	bank_label = null
 	market_title = null
 	market_list = null
@@ -266,14 +273,14 @@ func _build_crew_app() -> void:
 	for crew_member in roster:
 		if not (crew_member is Dictionary):
 			continue
-		_add_info_label("%s\n%s | %s | Health %d | $%d/week\nCan: %s\nTask: %s" % [
+		_add_info_label("%s\n%s | %s | Health %s | $%d/week\nCan: %s\nTask: %s" % [
 			str(crew_member.get("name", "Crew")),
 			"%s %s" % [
 				str(crew_member.get("archetype_name", crew_member.get("job", "Hireling"))),
 				str(crew_member.get("role_name", "Crew")),
 			],
 			str(crew_member.get("status", "Ready")),
-			int(crew_member.get("health", 0)),
+			_format_health(crew_member),
 			int(crew_member.get("upkeep", 0)),
 			_format_slot_list(crew_member.get("task_types", [])),
 			_format_assignment(crew_member),
@@ -298,6 +305,34 @@ func _build_hire_app() -> void:
 	if hire_message != "":
 		hire_status_label = _add_info_label(hire_message, 16)
 		hire_status_label.modulate = PHONE_TEXT_MUTED
+
+	var filter_row := HBoxContainer.new()
+	filter_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	filter_row.add_theme_constant_override("separation", 10)
+	app_content.add_child(filter_row)
+
+	var filter_label := Label.new()
+	filter_label.text = "Role"
+	filter_label.custom_minimum_size = Vector2(54.0, 38.0)
+	filter_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	filter_label.add_theme_font_size_override("font_size", 15)
+	filter_label.modulate = PHONE_TEXT_MUTED
+	filter_row.add_child(filter_label)
+
+	var role_filter := OptionButton.new()
+	role_filter.custom_minimum_size = Vector2(190.0, 38.0)
+	role_filter.tooltip_text = "Filter hire candidates by role"
+	_add_hire_role_filter_option(role_filter, "All Roles", "all")
+	_add_hire_role_filter_option(role_filter, "Transporter", "transporter")
+	_add_hire_role_filter_option(role_filter, "Muscle", "muscle")
+	_add_hire_role_filter_option(role_filter, "Production", "production")
+	role_filter.selected = _get_hire_role_filter_index(role_filter, hire_role_filter)
+	role_filter.item_selected.connect(_on_hire_role_filter_selected.bind(role_filter))
+	filter_row.add_child(role_filter)
+
+	var filter_spacer := Control.new()
+	filter_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	filter_row.add_child(filter_spacer)
 
 	var hire_panel := PanelContainer.new()
 	hire_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -331,20 +366,42 @@ func _build_raids_app() -> void:
 	var active_raid: Dictionary = game_state.get_active_raid_target()
 	if not active_raid.is_empty():
 		raid_status_label = Label.new()
-		raid_status_label.text = "Active raid: %s" % str(active_raid.get("name", "Raid"))
+		var active_mode := str(active_raid.get("mode", ""))
+		if active_mode == "departing":
+			raid_status_label.text = "Raid party leaving: %s\nSent: %s" % [
+				str(active_raid.get("name", "Raid")),
+				", ".join(PackedStringArray(active_raid.get("crew_names", []))),
+			]
+		elif active_mode == "sent":
+			raid_status_label.text = "Raid in progress: %s\nSent: %s" % [
+				str(active_raid.get("name", "Raid")),
+				", ".join(PackedStringArray(active_raid.get("crew_names", []))),
+			]
+		else:
+			raid_status_label.text = "Active raid: %s" % str(active_raid.get("name", "Raid"))
 		raid_status_label.add_theme_font_size_override("font_size", 17)
+		raid_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		app_content.add_child(raid_status_label)
 
-		var return_button := Button.new()
-		return_button.text = "Return Home"
-		return_button.pressed.connect(func(): return_home_requested.emit())
-		app_content.add_child(return_button)
+		if active_mode != "sent" and active_mode != "departing":
+			var return_button := Button.new()
+			return_button.text = "Return Home"
+			return_button.pressed.connect(func(): return_home_requested.emit())
+			app_content.add_child(return_button)
+		return
+
+	if selected_raid_target_id != "":
+		_build_raid_crew_picker(selected_raid_target_id)
 		return
 
 	var targets: Array = game_state.get_raid_targets()
 	if targets.is_empty():
 		_add_info_label("No raid targets available.", 18)
 		return
+
+	var report: Dictionary = game_state.get_last_raid_report()
+	if not report.is_empty():
+		_add_raid_report_card(report)
 
 	raid_status_label = Label.new()
 	raid_status_label.text = "Ready crew: %d" % game_state.get_ready_crew_count()
@@ -378,6 +435,76 @@ func _build_raids_app() -> void:
 		join_button.text = "Join"
 		join_button.pressed.connect(func(): raid_join_requested.emit(str(target.get("id", ""))))
 		row.add_child(join_button)
+
+
+func _build_raid_crew_picker(target_id: String) -> void:
+	var target: Dictionary = game_state.resolve_raid_target(target_id)
+	if target.is_empty():
+		selected_raid_target_id = ""
+		selected_raid_crew_ids.clear()
+		_add_info_label("That raid target is no longer available.", 18)
+		return
+
+	title_label.text = "Send Crew"
+	var crew_required := int(target.get("crew_required", 1))
+	raid_status_label = _add_info_label("%s | Difficulty %d | Select %d+ crew" % [
+		str(target.get("name", "Target")),
+		int(target.get("difficulty", 1)),
+		crew_required,
+	], 17)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	app_content.add_child(scroll)
+
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 8)
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+
+	var roster: Array = game_state.get_crew_roster()
+	for crew_member in roster:
+		if not (crew_member is Dictionary):
+			continue
+		var crew_id := str(crew_member.get("id", ""))
+		if crew_id == "":
+			continue
+		var is_ready := str(crew_member.get("status", "Ready")) == "Ready"
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		list.add_child(row)
+
+		var check_box := CheckBox.new()
+		check_box.button_pressed = bool(selected_raid_crew_ids.get(crew_id, false))
+		check_box.disabled = not is_ready
+		check_box.toggled.connect(_on_raid_crew_toggled.bind(crew_id))
+		row.add_child(check_box)
+
+		var label := Label.new()
+		label.text = "%s | %s | %s | Health %s" % [
+			str(crew_member.get("name", "Crew")),
+			str(crew_member.get("role_name", crew_member.get("role", "Crew"))),
+			str(crew_member.get("status", "Ready")),
+			_format_health(crew_member),
+		]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		row.add_child(label)
+
+	var action_row := HBoxContainer.new()
+	action_row.add_theme_constant_override("separation", 8)
+	app_content.add_child(action_row)
+
+	var launch_button := Button.new()
+	launch_button.text = "Launch Raid"
+	launch_button.pressed.connect(_on_confirm_send_raid_pressed.bind(target_id))
+	action_row.add_child(launch_button)
+
+	var cancel_button := Button.new()
+	cancel_button.text = "Cancel"
+	cancel_button.pressed.connect(_on_cancel_send_raid_pressed)
+	action_row.add_child(cancel_button)
 
 
 func _build_map_app() -> void:
@@ -617,11 +744,11 @@ func _refresh_hires() -> void:
 	for child in hire_list.get_children():
 		child.queue_free()
 
-	var hires: Array = game_state.get_available_hires()
+	var hires: Array = _filter_hires_by_role(game_state.get_available_hires())
 	if hires.is_empty():
 		hire_list.columns = 1
 		var empty_label := Label.new()
-		empty_label.text = "No one is looking for work right now."
+		empty_label.text = "No one matches that role right now." if hire_role_filter != "all" else "No one is looking for work right now."
 		empty_label.add_theme_font_size_override("font_size", 17)
 		empty_label.modulate = PHONE_TEXT_MUTED
 		hire_list.add_child(empty_label)
@@ -637,6 +764,33 @@ func _refresh_hires() -> void:
 	for candidate in hires:
 		if candidate is Dictionary:
 			_add_hire_row(candidate)
+
+
+func _filter_hires_by_role(hires: Array) -> Array:
+	if hire_role_filter == "all":
+		return hires
+	var filtered: Array = []
+	for candidate in hires:
+		if candidate is Dictionary and str(candidate.get("role", "")) == hire_role_filter:
+			filtered.append(candidate)
+	return filtered
+
+
+func _add_hire_role_filter_option(role_filter: OptionButton, label: String, role_id: String) -> void:
+	role_filter.add_item(label)
+	role_filter.set_item_metadata(role_filter.item_count - 1, role_id)
+
+
+func _get_hire_role_filter_index(role_filter: OptionButton, role_id: String) -> int:
+	for index in range(role_filter.item_count):
+		if str(role_filter.get_item_metadata(index)) == role_id:
+			return index
+	return 0
+
+
+func _on_hire_role_filter_selected(index: int, role_filter: OptionButton) -> void:
+	hire_role_filter = str(role_filter.get_item_metadata(index))
+	_refresh_hires()
 
 
 func _add_order_row(row: Dictionary) -> void:
@@ -963,11 +1117,88 @@ func _on_hire_pressed(candidate_id: String) -> void:
 
 
 func _on_send_raid_pressed(target_id: String) -> void:
-	var result: Dictionary = game_state.start_raid(target_id, false)
-	if bool(result.get("ok", false)):
-		result = game_state.complete_active_raid(true)
-	if raid_status_label != null:
-		raid_status_label.text = str(result.get("message", "Raid order updated."))
+	selected_raid_target_id = target_id
+	selected_raid_crew_ids.clear()
+	_show_app("raids")
+
+
+func _on_raid_crew_toggled(is_selected: bool, crew_id: String) -> void:
+	if is_selected:
+		selected_raid_crew_ids[crew_id] = true
+	else:
+		selected_raid_crew_ids.erase(crew_id)
+
+
+func _on_confirm_send_raid_pressed(target_id: String) -> void:
+	var target: Dictionary = game_state.resolve_raid_target(target_id)
+	var crew_required := int(target.get("crew_required", 1))
+	var crew_ids: Array = selected_raid_crew_ids.keys()
+	if crew_ids.size() < crew_required:
+		if raid_status_label != null:
+			raid_status_label.text = "Select at least %d crew." % crew_required
+		return
+	selected_raid_target_id = ""
+	selected_raid_crew_ids.clear()
+	raid_send_requested.emit(target_id, crew_ids)
+
+
+func _on_cancel_send_raid_pressed() -> void:
+	selected_raid_target_id = ""
+	selected_raid_crew_ids.clear()
+	_show_app("raids")
+
+
+func _add_raid_report_card(report: Dictionary) -> void:
+	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(PHONE_PANEL_BG, PHONE_PANEL_BORDER, 1, 0))
+	app_content.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	panel.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 5)
+	margin.add_child(stack)
+
+	var title := Label.new()
+	title.text = "Battle Summary"
+	title.add_theme_font_size_override("font_size", 18)
+	stack.add_child(title)
+
+	var outcome := "Success" if bool(report.get("success", false)) else "Failed"
+	_add_raid_report_line(stack, "Target", "%s | %s" % [str(report.get("target_name", "Raid")), outcome])
+	_add_raid_report_line(stack, "Sent", _format_raid_report_names(report.get("crew_sent", [])))
+	_add_raid_report_line(stack, "Returned", _format_raid_report_names(report.get("survivors", [])))
+	_add_raid_report_line(stack, "Your losses", _format_raid_report_names(report.get("casualties", [])))
+	_add_raid_report_line(stack, "Enemy killed", _format_raid_report_names(report.get("enemy_casualties", [])))
+	_add_raid_report_line(stack, "Enemy left", _format_raid_report_names(report.get("enemy_survivors", [])))
+
+	var reward_cash := int(report.get("reward_cash", 0))
+	var loot: Dictionary = report.get("loot", {})
+	_add_raid_report_line(stack, "Recovered", "$%d, %d goods" % [reward_cash, int(loot.get(game_state.GOOD_KEY, 0))])
+
+
+func _add_raid_report_line(parent: VBoxContainer, label_text: String, value_text: String) -> void:
+	var label := Label.new()
+	label.text = "%s: %s" % [label_text, value_text]
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("font_size", 15)
+	if value_text == "None":
+		label.modulate = PHONE_TEXT_MUTED
+	parent.add_child(label)
+
+
+func _format_raid_report_names(value: Variant) -> String:
+	if not (value is Array):
+		return "None"
+	if value.is_empty():
+		return "None"
+	return ", ".join(PackedStringArray(value))
 
 
 func _format_slot_list(value: Variant) -> String:
@@ -989,6 +1220,12 @@ func _format_assignment(crew_member: Dictionary) -> String:
 		if task is Dictionary and str(task.get("id", "")) == assigned_task:
 			return str(task.get("name", assigned_task))
 	return assigned_task.capitalize().replace("_", " ")
+
+
+func _format_health(crew_member: Dictionary) -> String:
+	var max_health: int = int(crew_member.get("max_health", crew_member.get("health", 0)))
+	var current_health: int = clamp(int(crew_member.get("health", max_health)), 0, max_health)
+	return "%d/%d" % [current_health, max_health]
 
 
 func _add_info_label(text: String, font_size: int = 16) -> Label:

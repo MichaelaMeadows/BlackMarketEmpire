@@ -13,6 +13,7 @@ func _init() -> void:
 	_test_daily_tick_order_updates_state()
 	_test_basic_anchor_prices_stay_bounded()
 	_test_local_inventory_changes_only_reprice_local_market()
+	_test_rolling_demand_pressure_tracks_supply_balance()
 	_test_connected_markets_trade_and_signal_route_pressure()
 	_test_route_modifiers_change_trade_behavior()
 	_test_disconnected_markets_do_not_equalize()
@@ -96,6 +97,25 @@ func _test_local_inventory_changes_only_reprice_local_market() -> void:
 	var remote_after: int = int(market.get_price("glasswater", "street_goods"))
 	_expect(local_after != local_before, "local stock action reprices local district")
 	_expect(remote_after == remote_before, "local stock action does not instantly reprice remote district")
+
+
+func _test_rolling_demand_pressure_tracks_supply_balance() -> void:
+	var market = _new_market(39)
+	market.goods["street_goods"]["volatility"] = 0.0
+	var target_demand: float = float(market.markets["rook_market"]["target_demand"].get("street_goods", 0.0))
+	_expect(target_demand > 0.0, "market initializes rolling 7-day demand targets")
+
+	market.add_inventory("rook_market", "street_goods", target_demand * 3.0)
+	var surplus_price: int = int(market.get_price("rook_market", "street_goods"))
+	var surplus_pressure: float = float(market.get_market_snapshot("rook_market").filter(func(item): return str(item.get("id", "")) == "street_goods")[0].get("supply_demand_pressure", 0.0))
+
+	market.remove_inventory("rook_market", "street_goods", 99999.0)
+	var shortage_price: int = int(market.get_price("rook_market", "street_goods"))
+	var shortage_pressure: float = float(market.get_market_snapshot("rook_market").filter(func(item): return str(item.get("id", "")) == "street_goods")[0].get("supply_demand_pressure", 0.0))
+
+	_expect(surplus_pressure >= -0.20 and surplus_pressure < 0.0, "over-supply applies bounded negative demand pressure")
+	_expect(shortage_pressure > 0.0 and shortage_pressure <= 0.20, "under-supply applies bounded positive demand pressure")
+	_expect(shortage_price > surplus_price, "rolling demand pressure makes scarce supply more expensive than surplus supply")
 
 
 func _test_connected_markets_trade_and_signal_route_pressure() -> void:
@@ -226,6 +246,7 @@ func _test_snapshot_contains_player_facing_market_signals() -> void:
 	var first: Dictionary = snapshot[0]
 	_expect(first.has("price") and first.has("trend") and first.has("scarcity") and first.has("route_pressure"), "snapshot exposes partial market signals")
 	_expect(first.has("buy_price") and first.has("sell_price"), "snapshot includes contact price helpers")
+	_expect(first.has("target_demand_7d") and first.has("supply_demand_pressure"), "snapshot includes rolling demand pressure signals")
 
 
 func _test_game_state_uses_active_district_prices() -> void:

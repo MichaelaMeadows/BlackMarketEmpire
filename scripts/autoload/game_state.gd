@@ -19,6 +19,17 @@ const TRADE_SOURCE_INFINITE = -1
 const HIRE_CANDIDATE_REFRESH_DAYS = 3
 const STARTING_HIRE_CANDIDATE_LIMIT = 2
 const MAX_HIRE_CANDIDATE_LIMIT = 6
+const DAILY_CREW_HEAL = 1
+const DAILY_PLAYER_HEAL = 1
+const DAY_LENGTH_SECONDS := 360.0
+const CALENDAR_START := {
+	"year": 2025,
+	"month": 4,
+	"day": 20,
+	"hour": 0,
+	"minute": 0,
+	"second": 0,
+}
 const LEGALITY_LEGAL = "legal"
 const LEGALITY_ILLICIT = "illicit"
 const LEGALITY_CONTROLLED = "controlled"
@@ -39,6 +50,9 @@ var current_scope: String = "neighborhood"
 var product_name: String = "Fast Food"
 var active_market_id: String = STARTING_MARKET_ID
 var day_count: int = 0
+var day_time_seconds: float = 0.0
+var player_health: int = 100
+var player_max_health: int = 100
 var market
 var progression
 var hire_name_generator = NAME_GENERATOR_SCRIPT.new(4177)
@@ -106,6 +120,7 @@ var raid_stats: Dictionary = {
 	"joined": 0,
 	"completed": 0,
 }
+var last_raid_report: Dictionary = {}
 
 func _ready() -> void:
 	_ensure_market()
@@ -553,7 +568,8 @@ func hire_employee(candidate_id: String) -> Dictionary:
 	crew_member.erase("available_day")
 	crew_member["status"] = "Ready"
 	crew_member["assigned_task"] = ""
-	crew_member["health"] = int(crew_member.get("health", 60))
+	crew_member["max_health"] = int(crew_member.get("max_health", crew_member.get("health", 60)))
+	crew_member["health"] = clamp(int(crew_member.get("health", crew_member["max_health"])), 0, int(crew_member["max_health"]))
 	crew_member["faction"] = "player_crew"
 	crew_member["visual_id"] = _get_hire_visual_id(str(crew_member.get("archetype", "")))
 	if not crew_member.has("color"):
@@ -593,6 +609,103 @@ func get_ready_crew_count(role_id: String = "") -> int:
 		if str(crew_member.get("status", "Ready")) == "Ready":
 			count += 1
 	return count
+
+
+func set_player_health(current_health: int, max_health: int = -1) -> void:
+	var previous_health := player_health
+	var previous_max_health := player_max_health
+	if max_health > 0:
+		player_max_health = max(1, max_health)
+	player_health = clamp(current_health, 0, player_max_health)
+	if player_health == previous_health and player_max_health == previous_max_health:
+		return
+	state_changed.emit()
+
+
+func get_player_health() -> Dictionary:
+	return {
+		"health": player_health,
+		"max_health": player_max_health,
+	}
+
+
+func get_day_length_seconds() -> float:
+	return DAY_LENGTH_SECONDS
+
+
+func advance_game_time(delta_seconds: float) -> Dictionary:
+	if delta_seconds <= 0.0:
+		return {
+			"days_advanced": 0,
+			"clock_changed": false,
+		}
+	var previous_minute: int = _get_clock_minute_of_day()
+	day_time_seconds += delta_seconds
+	var days_advanced: int = 0
+	while day_time_seconds >= DAY_LENGTH_SECONDS:
+		day_time_seconds -= DAY_LENGTH_SECONDS
+		days_advanced += 1
+	if days_advanced > 0:
+		advance_market(days_advanced)
+	var current_minute: int = _get_clock_minute_of_day()
+	return {
+		"days_advanced": days_advanced,
+		"clock_changed": current_minute != previous_minute or days_advanced > 0,
+	}
+
+
+func get_clock_snapshot() -> Dictionary:
+	var minute_of_day: int = _get_clock_minute_of_day()
+	var calendar_date: Dictionary = _get_calendar_date(day_count)
+	return {
+		"day": day_count + 1,
+		"year": int(calendar_date.get("year", 2025)),
+		"month": int(calendar_date.get("month", 4)),
+		"month_name": _get_month_name(int(calendar_date.get("month", 4))),
+		"day_of_month": int(calendar_date.get("day", 20)),
+		"weekday": int(calendar_date.get("weekday", 0)),
+		"weekday_name": _get_weekday_name(int(calendar_date.get("weekday", 0))),
+		"hour": int(minute_of_day / 60),
+		"minute": minute_of_day % 60,
+		"day_progress": clampf(day_time_seconds / DAY_LENGTH_SECONDS, 0.0, 1.0),
+		"day_length_seconds": DAY_LENGTH_SECONDS,
+	}
+
+
+func get_clock_label() -> String:
+	var snapshot: Dictionary = get_clock_snapshot()
+	return "%s, %s %d, %d  %02d:%02d" % [
+		str(snapshot.get("weekday_name", "Sun")),
+		str(snapshot.get("month_name", "Apr")),
+		int(snapshot.get("day_of_month", 20)),
+		int(snapshot.get("year", 2025)),
+		int(snapshot.get("hour", 0)),
+		int(snapshot.get("minute", 0)),
+	]
+
+
+func set_crew_health(crew_id: String, current_health: int, max_health: int = -1) -> Dictionary:
+	var crew_index := _find_crew_index(crew_id)
+	if crew_index < 0:
+		return _result(false, "Crew member not found.")
+	var crew_member: Dictionary = crew_roster[crew_index]
+	var resolved_max_health: int = int(crew_member.get("max_health", crew_member.get("health", 60)))
+	if max_health > 0:
+		resolved_max_health = max(1, max_health)
+	var resolved_health: int = clamp(current_health, 0, resolved_max_health)
+	if int(crew_member.get("health", resolved_health)) == resolved_health and int(crew_member.get("max_health", resolved_max_health)) == resolved_max_health:
+		return _result(true, "%s health unchanged." % str(crew_member.get("name", "Crew")))
+	crew_member["max_health"] = resolved_max_health
+	crew_member["health"] = resolved_health
+	crew_roster[crew_index] = crew_member
+	state_changed.emit()
+	return _result(true, "%s health updated." % str(crew_member.get("name", "Crew")))
+
+
+func heal_crew_over_time(days: int) -> void:
+	_heal_roster(days)
+	_heal_player(days)
+	state_changed.emit()
 
 
 func get_base_role_limits() -> Dictionary:
@@ -767,10 +880,109 @@ func start_raid(target_id: String, join_player: bool = false) -> Dictionary:
 	return _result(true, "Raid started: %s." % str(target.get("name", target_id)))
 
 
+func send_raid(target_id: String, crew_ids: Array) -> Dictionary:
+	if not active_raid_target.is_empty():
+		return _result(false, "A raid is already active.")
+
+	var target: Dictionary = resolve_raid_target(target_id)
+	if target.is_empty():
+		return _result(false, "Raid target is not available.")
+
+	var selected_ids: Array = []
+	for value in crew_ids:
+		var crew_id := str(value)
+		if crew_id != "" and not selected_ids.has(crew_id):
+			selected_ids.append(crew_id)
+
+	var crew_required: int = int(target.get("crew_required", 1))
+	if selected_ids.size() < crew_required:
+		return _result(false, "Select at least %d crew." % crew_required)
+
+	for crew_id in selected_ids:
+		var crew_index := _find_crew_index(crew_id)
+		if crew_index < 0:
+			return _result(false, "Crew member is not available.")
+		var crew_member: Dictionary = crew_roster[crew_index]
+		if not _is_crew_member_alive(crew_member):
+			return _result(false, "%s cannot raid." % str(crew_member.get("name", "Crew")))
+		if str(crew_member.get("status", "Ready")) != "Ready":
+			return _result(false, "%s is busy." % str(crew_member.get("name", "Crew")))
+
+	target["mode"] = "departing"
+	target["crew_ids"] = selected_ids
+	target["crew_names"] = _get_crew_names_for_ids(selected_ids)
+	active_raid_target = target
+	last_raid_report = {}
+	for crew_id in selected_ids:
+		var crew_index := _find_crew_index(crew_id)
+		if crew_index >= 0:
+			crew_roster[crew_index]["status"] = "Leaving"
+			crew_roster[crew_index]["assigned_task"] = "raid:%s" % target_id
+	state_changed.emit()
+
+	return _result(true, "%s is heading for the exit." % ", ".join(PackedStringArray(target.get("crew_names", []))))
+
+
+func begin_sent_raid(departed_crew_ids: Array) -> Dictionary:
+	if active_raid_target.is_empty() or str(active_raid_target.get("mode", "")) != "departing":
+		return _result(false, "No raid party is leaving.")
+
+	var target := active_raid_target.duplicate(true)
+	var selected_ids: Array = target.get("crew_ids", [])
+	var participant_ids: Array = []
+	var selected_crew: Array = []
+	for value in departed_crew_ids:
+		var crew_id := str(value)
+		if crew_id == "" or participant_ids.has(crew_id) or not selected_ids.has(crew_id):
+			continue
+		var crew_index := _find_crew_index(crew_id)
+		if crew_index < 0:
+			continue
+		var crew_member: Dictionary = crew_roster[crew_index]
+		if not _is_crew_member_alive(crew_member):
+			continue
+		participant_ids.append(crew_id)
+		selected_crew.append(crew_member.duplicate(true))
+
+	if participant_ids.is_empty():
+		active_raid_target = {}
+		state_changed.emit()
+		return _result(false, "No crew made it out for the raid.")
+
+	target["mode"] = "sent"
+	target["crew_ids"] = participant_ids
+	target["crew_names"] = _get_crew_names_for_ids(participant_ids)
+	active_raid_target = target
+	for crew_id in participant_ids:
+		var crew_index := _find_crew_index(crew_id)
+		if crew_index >= 0:
+			crew_roster[crew_index]["status"] = "Raiding"
+			crew_roster[crew_index]["assigned_task"] = "raid:%s" % str(target.get("id", ""))
+	raid_stats["launched"] = int(raid_stats.get("launched", 0)) + 1
+	record_progression_event("raid_started", {
+		"target_id": str(target.get("id", "")),
+		"metrics": {"raids_started": 1},
+	})
+	state_changed.emit()
+
+	var result := _result(true, "%s left for %s." % [
+		", ".join(PackedStringArray(target.get("crew_names", []))),
+		str(target.get("name", target.get("id", "raid"))),
+	])
+	result["duration_seconds"] = _get_sent_raid_duration(target, selected_crew)
+	return result
+
+
 func complete_active_raid(success: bool = true) -> Dictionary:
 	if active_raid_target.is_empty():
 		return _result(false, "No active raid.")
 	var target_name: String = str(active_raid_target.get("name", "Raid"))
+	var active_target := active_raid_target.duplicate(true)
+	var is_sent_raid := str(active_target.get("mode", "")) == "sent"
+	var report: Dictionary = {}
+	if is_sent_raid:
+		report = _resolve_sent_raid_report(active_target, success)
+		success = bool(report.get("success", success))
 	if success:
 		raid_stats["completed"] = int(raid_stats.get("completed", 0)) + 1
 		cash += 35
@@ -780,13 +992,33 @@ func complete_active_raid(success: bool = true) -> Dictionary:
 			"target_id": str(active_raid_target.get("id", "")),
 			"metrics": {"raids_completed": 1},
 		})
+	if is_sent_raid:
+		_apply_sent_raid_report(report)
+		last_raid_report = report
+	else:
+		var report_loot: Dictionary = {}
+		if success:
+			report_loot[GOOD_KEY] = 2
+		last_raid_report = {
+			"target_id": str(active_target.get("id", "")),
+			"target_name": target_name,
+			"success": success,
+			"message": "%s complete." % target_name,
+			"reward_cash": 35 if success else 0,
+			"loot": report_loot,
+		}
 	active_raid_target = {}
 	state_changed.emit()
-	return _result(success, "%s complete." % target_name)
+	var message := str(last_raid_report.get("message", "%s complete." % target_name))
+	return _result(success, message)
 
 
 func get_active_raid_target() -> Dictionary:
 	return active_raid_target.duplicate(true)
+
+
+func get_last_raid_report() -> Dictionary:
+	return last_raid_report.duplicate(true)
 
 
 func get_raid_stats() -> Dictionary:
@@ -872,6 +1104,8 @@ func advance_market(days: int = 1) -> void:
 	_ensure_progression()
 	market.advance_day(days)
 	_apply_weekly_finances(days)
+	_heal_roster(days)
+	_heal_player(days)
 	_advance_hire_candidates(days)
 	_record_recent_production()
 	_emit_progression_events(progression.advance_day(days))
@@ -1011,6 +1245,7 @@ func _add_hire_candidate() -> void:
 		"status": "Ready",
 		"assigned_task": "",
 		"health": 60,
+		"max_health": 60,
 		"available_day": day_count,
 	}
 	_apply_default_hire_loadout(candidate)
@@ -1076,6 +1311,7 @@ func _extract_crew_from_map(map_data: Dictionary) -> Array:
 			"carry_capacity_kg": int(staff_profile.get("carry_capacity_kg", RUNNER_CARRY_CAPACITY_KG)),
 			"upkeep": int(staff_profile.get("upkeep", 0)),
 			"health": int(npc.get("health", 60)),
+			"max_health": int(npc.get("max_health", npc.get("health", 60))),
 			"color": npc.get("color", []),
 			"visual_id": str(npc.get("visual_id", "crew_jacket")),
 			"faction": str(npc.get("faction", "player_crew")),
@@ -1151,12 +1387,207 @@ func _apply_weekly_finances(days: int) -> void:
 	})
 
 
+func _heal_roster(days: int) -> void:
+	var heal_amount: int = max(0, days) * DAILY_CREW_HEAL
+	if heal_amount <= 0:
+		return
+	for index in range(crew_roster.size()):
+		var crew_member: Variant = crew_roster[index]
+		if not (crew_member is Dictionary):
+			continue
+		if not _is_crew_member_alive(crew_member):
+			continue
+		var max_health: int = int(crew_member.get("max_health", crew_member.get("health", 60)))
+		var current_health: int = int(crew_member.get("health", max_health))
+		crew_member["max_health"] = max_health
+		crew_member["health"] = min(max_health, current_health + heal_amount)
+		crew_roster[index] = crew_member
+
+
+func _heal_player(days: int) -> void:
+	var heal_amount: int = max(0, days) * DAILY_PLAYER_HEAL
+	if heal_amount <= 0 or player_health <= 0:
+		return
+	player_health = min(player_max_health, player_health + heal_amount)
+
+
+func _get_clock_minute_of_day() -> int:
+	if DAY_LENGTH_SECONDS <= 0.0:
+		return 0
+	var progress: float = clampf(day_time_seconds / DAY_LENGTH_SECONDS, 0.0, 0.99999)
+	return int(floor(progress * 1440.0))
+
+
+func _get_calendar_date(days_elapsed: int) -> Dictionary:
+	var start_date: Dictionary = CALENDAR_START.duplicate(true)
+	var start_unix: int = int(Time.get_unix_time_from_datetime_dict(start_date))
+	var date_unix: int = start_unix + max(0, days_elapsed) * 86400
+	return Time.get_datetime_dict_from_unix_time(date_unix)
+
+
+func _get_month_name(month: int) -> String:
+	var month_names := PackedStringArray(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
+	if month < 1 or month > month_names.size():
+		return "???"
+	return month_names[month - 1]
+
+
+func _get_weekday_name(weekday: int) -> String:
+	var weekday_names := PackedStringArray(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])
+	if weekday < 0 or weekday >= weekday_names.size():
+		return "???"
+	return weekday_names[weekday]
+
+
 func _find_crew_index(crew_id: String) -> int:
 	for index in range(crew_roster.size()):
 		var crew_member: Variant = crew_roster[index]
 		if crew_member is Dictionary and str(crew_member.get("id", "")) == crew_id:
 			return index
 	return -1
+
+
+func _get_crew_names_for_ids(crew_ids: Array) -> Array:
+	var names: Array = []
+	for value in crew_ids:
+		var crew_index := _find_crew_index(str(value))
+		if crew_index < 0:
+			continue
+		var crew_member: Dictionary = crew_roster[crew_index]
+		names.append(str(crew_member.get("name", "Crew")))
+	return names
+
+
+func _get_sent_raid_duration(target: Dictionary, selected_crew: Array) -> float:
+	var difficulty: int = max(1, int(target.get("difficulty", 1)))
+	var crew_count: int = max(1, selected_crew.size())
+	return float(clamp(2.5 + float(difficulty) - float(crew_count) * 0.25, 2.0, 6.0))
+
+
+func _resolve_sent_raid_report(target: Dictionary, requested_success: bool) -> Dictionary:
+	var crew_ids: Array = target.get("crew_ids", [])
+	var crew_names: Array = target.get("crew_names", _get_crew_names_for_ids(crew_ids))
+	var enemy_names: Array = _get_raid_enemy_names(target)
+	var difficulty: int = max(1, int(target.get("difficulty", 1)))
+	var crew_required: int = max(1, int(target.get("crew_required", 1)))
+	var crew_count: int = crew_ids.size()
+	var success: bool = requested_success and crew_count >= crew_required and crew_count >= difficulty
+	var casualty_count: int = 0
+	if crew_count > 0:
+		if success:
+			casualty_count = max(0, difficulty - crew_count - 1)
+		else:
+			casualty_count = clamp(difficulty - crew_count + 1, 1, crew_count)
+
+	var casualty_ids: Array = []
+	var casualty_names: Array = []
+	var survivor_ids: Array = []
+	var survivor_names: Array = []
+	var survivor_health_after: Dictionary = {}
+	for index in range(crew_ids.size()):
+		var crew_id := str(crew_ids[index])
+		var crew_name := str(crew_names[index]) if index < crew_names.size() else crew_id
+		if index < casualty_count:
+			casualty_ids.append(crew_id)
+			casualty_names.append(crew_name)
+		else:
+			survivor_ids.append(crew_id)
+			survivor_names.append(crew_name)
+			var crew_index := _find_crew_index(crew_id)
+			if crew_index >= 0:
+				var crew_member: Dictionary = crew_roster[crew_index]
+				var current_health := int(crew_member.get("health", crew_member.get("max_health", 60)))
+				var wound_damage := difficulty * (6 if success else 12)
+				survivor_health_after[crew_id] = max(1, current_health - wound_damage)
+
+	var enemy_casualty_count: int = enemy_names.size() if success else min(enemy_names.size(), max(0, crew_count - casualty_count))
+	var enemy_casualties: Array = []
+	var enemy_survivors: Array = []
+	for index in range(enemy_names.size()):
+		if index < enemy_casualty_count:
+			enemy_casualties.append(enemy_names[index])
+		else:
+			enemy_survivors.append(enemy_names[index])
+
+	var target_name: String = str(target.get("name", "Raid"))
+	var message: String = ""
+	if success:
+		message = "%s hit %s and came back with supplies." % [_format_names_for_report(survivor_names), target_name]
+		if not casualty_names.is_empty():
+			message += " Lost: %s." % _format_names_for_report(casualty_names)
+		if not enemy_casualties.is_empty():
+			message += " Enemy losses: %s." % _format_names_for_report(enemy_casualties)
+	else:
+		message = "%s failed at %s." % [_format_names_for_report(crew_names), target_name]
+		if not casualty_names.is_empty():
+			message += " Lost: %s." % _format_names_for_report(casualty_names)
+		if not enemy_casualties.is_empty():
+			message += " Enemy losses: %s." % _format_names_for_report(enemy_casualties)
+
+	var loot: Dictionary = {}
+	if success:
+		loot[GOOD_KEY] = 2
+	return {
+		"target_id": str(target.get("id", "")),
+		"target_name": target_name,
+		"success": success,
+		"crew_sent": crew_names,
+		"survivors": survivor_names,
+		"casualties": casualty_names,
+		"enemy_casualties": enemy_casualties,
+		"enemy_survivors": enemy_survivors,
+		"survivor_ids": survivor_ids,
+		"survivor_health_after": survivor_health_after,
+		"casualty_ids": casualty_ids,
+		"reward_cash": 35 if success else 0,
+		"loot": loot,
+		"message": message,
+	}
+
+
+func _get_raid_enemy_names(target: Dictionary) -> Array:
+	var enemy_names: Array = []
+	var path := str(target.get("path", ""))
+	if path != "" and FileAccess.file_exists(path):
+		var source := FileAccess.get_file_as_string(path)
+		var parsed: Variant = JSON.parse_string(source)
+		if parsed is Dictionary:
+			for npc in parsed.get("npcs", []):
+				if not (npc is Dictionary):
+					continue
+				var faction := str(npc.get("faction", ""))
+				if faction == "player" or faction == "player_crew":
+					continue
+				enemy_names.append(str(npc.get("name", npc.get("id", "Enemy"))))
+	if enemy_names.is_empty():
+		for index in range(max(1, int(target.get("difficulty", 1)))):
+			enemy_names.append("Rival %d" % (index + 1))
+	return enemy_names
+
+
+func _format_names_for_report(names: Array) -> String:
+	if names.is_empty():
+		return "None"
+	return ", ".join(PackedStringArray(names))
+
+
+func _apply_sent_raid_report(report: Dictionary) -> void:
+	for value in report.get("survivor_ids", []):
+		var crew_index := _find_crew_index(str(value))
+		if crew_index < 0:
+			continue
+		var survivor_health_after: Dictionary = report.get("survivor_health_after", {})
+		if survivor_health_after.has(str(value)):
+			crew_roster[crew_index]["health"] = clamp(int(survivor_health_after[str(value)]), 1, int(crew_roster[crew_index].get("max_health", crew_roster[crew_index].get("health", 60))))
+		crew_roster[crew_index]["status"] = "Ready"
+		crew_roster[crew_index]["assigned_task"] = ""
+	for value in report.get("casualty_ids", []):
+		var crew_index := _find_crew_index(str(value))
+		if crew_index < 0:
+			continue
+		crew_roster[crew_index]["health"] = 0
+		crew_roster[crew_index]["status"] = "Lost"
+		crew_roster[crew_index]["assigned_task"] = ""
 
 
 func _find_hire_candidate_index(candidate_id: String) -> int:

@@ -18,6 +18,12 @@ func setup(new_max_health: int) -> void:
 	health_changed.emit(current_health, max_health)
 
 
+func setup_values(new_current_health: int, new_max_health: int) -> void:
+	max_health = max(1, new_max_health)
+	current_health = clamp(new_current_health, 0, max_health)
+	health_changed.emit(current_health, max_health)
+
+
 func apply_damage(amount: int) -> void:
 	if amount <= 0 or current_health <= 0:
 		return

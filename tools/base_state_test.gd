@@ -12,7 +12,9 @@ func _init() -> void:
 	_state = GAME_STATE_SCRIPT.new()
 	_state._ready()
 	_test_base_state_initializes_from_map()
+	_test_game_clock_advances_days()
 	_test_raid_readiness_uses_base_crew()
+	_test_departure_death_excludes_crew_from_raid()
 	_test_hiring_pool()
 	_test_runner_trade_orders()
 
@@ -60,6 +62,24 @@ func _test_base_state_initializes_from_map() -> void:
 	map_loader.free()
 
 
+func _test_game_clock_advances_days() -> void:
+	var state = GAME_STATE_SCRIPT.new()
+	state._ready()
+	_expect(is_equal_approx(state.get_day_length_seconds(), 360.0), "one game day lasts six minutes")
+	_expect(state.get_clock_label() == "Sun, Apr 20, 2025  00:00", "calendar starts on April 20 2025 at midnight")
+	var start_snapshot: Dictionary = state.get_clock_snapshot()
+	_expect(int(start_snapshot.get("year", 0)) == 2025, "clock snapshot exposes calendar year")
+	_expect(int(start_snapshot.get("month", 0)) == 4, "clock snapshot exposes calendar month")
+	_expect(int(start_snapshot.get("day_of_month", 0)) == 20, "clock snapshot exposes calendar day")
+	var half_day_result: Dictionary = state.advance_game_time(180.0)
+	_expect(int(half_day_result.get("days_advanced", -1)) == 0, "half a day does not advance calendar day")
+	_expect(state.get_clock_label() == "Sun, Apr 20, 2025  12:00", "half a six-minute day reads noon on start date")
+	var rollover_result: Dictionary = state.advance_game_time(180.0)
+	_expect(int(rollover_result.get("days_advanced", 0)) == 1, "six minutes advances one game day")
+	_expect(state.day_count == 1, "clock rollover increments day count")
+	_expect(state.get_clock_label() == "Mon, Apr 21, 2025  00:00", "clock rolls to next calendar day")
+
+
 func _test_raid_readiness_uses_base_crew() -> void:
 	var roster: Array = _state.get_crew_roster()
 	_expect(roster.size() == 1, "starter house initializes one crew member")
@@ -81,6 +101,37 @@ func _test_raid_readiness_uses_base_crew() -> void:
 	_expect(_state.get_active_raid_target().get("id") == "abandoned_depot", "active raid target records")
 	_state.complete_active_raid(false)
 
+	var send_result: Dictionary = _state.send_raid("abandoned_depot", ["benji_runner"])
+	_expect(bool(send_result.get("ok", false)), "selected crew can be sent toward raid")
+	_expect(str(_state.get_active_raid_target().get("mode", "")) == "departing", "sent raid waits for crew departure")
+	var leaving_benji: Dictionary = _find_crew_member(_state.get_crew_roster(), "benji_runner")
+	_expect(str(leaving_benji.get("status", "")) == "Leaving", "sent crew leaves ready duty before raid starts")
+	_expect(_state.get_ready_crew_count() == 0, "departing crew is not counted as ready")
+	_expect(int(_state.get_raid_stats().get("launched", 0)) == 1, "previous joined raid is the only launched raid before departure finishes")
+	var begin_result: Dictionary = _state.begin_sent_raid(["benji_runner"])
+	_expect(bool(begin_result.get("ok", false)), "departed crew starts raid after leaving map")
+	_expect(str(_state.get_active_raid_target().get("mode", "")) == "sent", "departed raid records active mode")
+	var raiding_benji: Dictionary = _find_crew_member(_state.get_crew_roster(), "benji_runner")
+	_expect(str(raiding_benji.get("status", "")) == "Raiding", "departed crew participates in raid")
+	var sent_complete_result: Dictionary = _state.complete_active_raid(true)
+	_expect(bool(sent_complete_result.get("ok", false)), "sent raid can resolve")
+	var raid_report: Dictionary = _state.get_last_raid_report()
+	_expect(bool(raid_report.get("success", false)), "sent raid records a successful report")
+	_expect(PackedStringArray(raid_report.get("survivors", [])).has("Benji"), "sent raid report records returned crew")
+	_expect(PackedStringArray(raid_report.get("enemy_casualties", [])).has("Depot Guard"), "sent raid report records enemy deaths")
+	_expect(PackedStringArray(raid_report.get("enemy_casualties", [])).has("Depot Lookout"), "sent raid report records all defeated enemies")
+	var returned_benji: Dictionary = _find_crew_member(_state.get_crew_roster(), "benji_runner")
+	_expect(str(returned_benji.get("status", "")) == "Ready", "surviving sent crew returns ready")
+	_expect(int(returned_benji.get("health", 0)) < int(returned_benji.get("max_health", 0)), "surviving sent crew can return wounded")
+	var wounded_health := int(returned_benji.get("health", 0))
+	_state.advance_market(2)
+	returned_benji = _find_crew_member(_state.get_crew_roster(), "benji_runner")
+	_expect(int(returned_benji.get("health", 0)) == wounded_health + 2, "wounded crew heals slowly over days")
+	_state.set_player_health(75, 100)
+	_state.advance_market(3)
+	_expect(int(_state.get_player_health().get("health", 0)) == 78, "player heals slowly over days")
+	_expect(_state.get_ready_crew_count() == 1, "surviving sent crew counts as ready again")
+
 	var removal_result: Dictionary = _state.remove_crew_member("benji_runner")
 	_expect(bool(removal_result.get("ok", false)), "dead crew member can be removed")
 	_expect(_state.get_crew_roster().is_empty(), "dead crew member is removed from roster")
@@ -89,6 +140,25 @@ func _test_raid_readiness_uses_base_crew() -> void:
 	_expect(not bool(result.get("ok", false)), "dead crew member cannot satisfy raid crew requirement")
 	var buy_result: Dictionary = _state.place_buy_order(1)
 	_expect(not bool(buy_result.get("ok", false)), "dead transporter cannot take trade orders")
+
+
+func _test_departure_death_excludes_crew_from_raid() -> void:
+	var state = GAME_STATE_SCRIPT.new()
+	state._ready()
+	var map_loader = MAP_LOADER_SCRIPT.new()
+	get_root().add_child(map_loader)
+	_expect(map_loader.load_map(MAP_PATH), "starter house map loads for departure death")
+	state.initialize_base_from_map(map_loader.get_map_data())
+
+	var send_result: Dictionary = state.send_raid("abandoned_depot", ["benji_runner"])
+	_expect(bool(send_result.get("ok", false)), "crew can start leaving for a raid")
+	var removal_result: Dictionary = state.remove_crew_member("benji_runner")
+	_expect(bool(removal_result.get("ok", false)), "crew can die before leaving the map")
+	var begin_result: Dictionary = state.begin_sent_raid(["benji_runner"])
+	_expect(not bool(begin_result.get("ok", false)), "dead departing crew does not participate in raid")
+	_expect(state.get_active_raid_target().is_empty(), "raid cancels if nobody reaches the exit")
+	_expect(int(state.get_raid_stats().get("launched", 0)) == 0, "departure death does not count as a launched raid")
+	map_loader.free()
 
 
 func _test_hiring_pool() -> void:
@@ -276,6 +346,13 @@ func _has_crew_member(roster: Array, crew_id: String) -> bool:
 		if crew_member is Dictionary and str(crew_member.get("id", "")) == crew_id:
 			return true
 	return false
+
+
+func _find_crew_member(roster: Array, crew_id: String) -> Dictionary:
+	for crew_member in roster:
+		if crew_member is Dictionary and str(crew_member.get("id", "")) == crew_id:
+			return crew_member
+	return {}
 
 
 func _expect(condition: bool, label: String) -> void:

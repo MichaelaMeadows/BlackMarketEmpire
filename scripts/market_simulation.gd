@@ -3,6 +3,8 @@ class_name MarketSimulation
 
 const DEFAULT_DATA_PATH = "res://data/economy"
 const DEFAULT_MARKET_ID = "rook_market"
+const ROLLING_DEMAND_DAYS = 7
+const DEFAULT_SUPPLY_DEMAND_PRICE_EFFECT = 0.20
 
 var goods: Dictionary = {}
 var recipes: Array = []
@@ -171,6 +173,8 @@ func get_market_snapshot(market_id: String = "") -> Array:
 			"route_pressure": _get_route_pressure(market).get(good_id, "quiet"),
 			"demand_served": float(_get_demand_served(market).get(good_id, 0.0)),
 			"demand_unserved": float(_get_demand_unserved(market).get(good_id, 0.0)),
+			"target_demand_7d": float(_get_target_demand(market).get(good_id, 0.0)),
+			"supply_demand_pressure": _get_rolling_demand_price_pressure(market, good_id),
 		})
 	return snapshot
 
@@ -208,11 +212,16 @@ func _build_market_state(market: Dictionary) -> Dictionary:
 	state["production"] = {}
 	state["route_pressure"] = {}
 	state["desire"] = {}
+	state["daily_demand_target"] = {}
+	state["demand_history"] = {}
+	state["target_demand"] = {}
 
 	for good_id in goods:
 		_get_inventory(state)[good_id] = float(_get_inventory(state).get(good_id, 0.0))
 		_get_market_prices(state)[good_id] = _get_base_price(good_id)
 		_get_previous_prices(state)[good_id] = _get_base_price(good_id)
+		_get_daily_demand_target(state)[good_id] = 0.0
+		_initialize_demand_history(state, good_id)
 
 	for segment_id in _get_market_segments(state):
 		_get_desire(state)[segment_id] = {}
@@ -291,11 +300,13 @@ func _run_consumers() -> void:
 		var market: Dictionary = markets[market_id]
 		_reset_good_totals(_get_demand_served(market))
 		_reset_good_totals(_get_demand_unserved(market))
+		_reset_good_totals(_get_daily_demand_target(market))
 		for segment_id in _get_market_segments(market):
 			var segment_weight = float(_get_market_segments(market).get(segment_id, 1.0))
 			var segment: Dictionary = consumer_segments.get(segment_id, {})
 			for good_id in _as_dictionary(segment.get("demands", {})).keys():
 				_consume_good(market_id, market, segment_id, segment, good_id, segment_weight)
+		_commit_daily_demand_targets(market)
 
 
 func _consume_good(market_id: String, market: Dictionary, segment_id: String, segment: Dictionary, good_id: String, segment_weight: float) -> void:
@@ -309,6 +320,8 @@ func _consume_good(market_id: String, market: Dictionary, segment_id: String, se
 	var max_price = float(demand.get("max_price", min_price))
 	if bool(goods[good_id].get("habit_forming", false)):
 		max_price *= 1.0 + clamp(desire - 1.0, 0.0, 3.0) * 0.35
+
+	_get_daily_demand_target(market)[good_id] = float(_get_daily_demand_target(market).get(good_id, 0.0)) + requested_quantity
 
 	var price = float(get_price(market_id, good_id))
 	var willingness = _get_willingness(price, min_price, max_price, float(demand.get("elasticity", 1.0)))
@@ -381,18 +394,21 @@ func _calculate_price(market_id: String, good_id: String) -> float:
 	var served = float(_get_demand_served(market).get(good_id, 0.0))
 	var unserved = float(_get_demand_unserved(market).get(good_id, 0.0))
 	var demand_pressure = unserved / max(1.0, served + unserved)
+	var supply_demand_pressure = _get_rolling_demand_price_pressure(market, good_id)
 	var input_pressure = _get_input_cost_pressure(market_id, good_id)
 	var import_relief = _get_import_relief(market_id, good_id)
 	var desire_pressure = _get_average_desire_pressure(market, good_id)
-	var drift = _rng.randf_range(-float(good.get("volatility", 0.05)), float(good.get("volatility", 0.05))) * 0.03
+	var volatility = max(0.0, float(good.get("volatility", 0.05)))
+	var normal_noise = clamp(_sample_normal(0.0, volatility), -volatility * 2.0, volatility * 2.0)
 
 	var multiplier = 1.0
 	multiplier += scarcity_ratio * 0.32
 	multiplier += demand_pressure * 0.45
+	multiplier += supply_demand_pressure
 	multiplier += (input_pressure - 1.0) * 0.35
 	multiplier += desire_pressure * 0.20
 	multiplier -= import_relief
-	multiplier += drift
+	multiplier += normal_noise
 
 	var price = max(1.0, base_price * max(0.35, multiplier))
 	if bool(good.get("basic_anchor", false)):
@@ -456,6 +472,47 @@ func _get_target_stock(market: Dictionary, good_id: String) -> float:
 		if str(output.get("good", "")) == good_id:
 			target += float(output.get("quantity", 0.0)) * 2.0
 	return target
+
+
+func _initialize_demand_history(market: Dictionary, good_id: String) -> void:
+	var daily_target = _get_baseline_daily_demand(market, good_id)
+	var history = []
+	for _index in range(ROLLING_DEMAND_DAYS):
+		history.append(daily_target)
+	_get_demand_history(market)[good_id] = history
+	_get_target_demand(market)[good_id] = daily_target * ROLLING_DEMAND_DAYS
+
+
+func _commit_daily_demand_targets(market: Dictionary) -> void:
+	for good_id in goods:
+		var history = _as_array(_get_demand_history(market).get(good_id, []))
+		if history.is_empty():
+			_initialize_demand_history(market, good_id)
+			history = _as_array(_get_demand_history(market).get(good_id, []))
+		history.append(float(_get_daily_demand_target(market).get(good_id, 0.0)))
+		while history.size() > ROLLING_DEMAND_DAYS:
+			history.pop_front()
+		_get_demand_history(market)[good_id] = history
+		_get_target_demand(market)[good_id] = _sum_float_array(history)
+
+
+func _get_baseline_daily_demand(market: Dictionary, good_id: String) -> float:
+	var target = 0.0
+	for segment_id in _get_market_segments(market):
+		var weight = float(_get_market_segments(market).get(segment_id, 1.0))
+		var segment: Dictionary = consumer_segments.get(segment_id, {})
+		var demand = _as_dictionary(_as_dictionary(segment.get("demands", {})).get(good_id, {}))
+		target += float(demand.get("quantity", 0.0)) * weight
+	return target
+
+
+func _get_rolling_demand_price_pressure(market: Dictionary, good_id: String) -> float:
+	var target_demand = float(_get_target_demand(market).get(good_id, 0.0))
+	if target_demand <= 0.0:
+		return 0.0
+	var stock = float(_get_inventory(market).get(good_id, 0.0))
+	var effect = float(goods.get(good_id, {}).get("supply_demand_price_effect", DEFAULT_SUPPLY_DEMAND_PRICE_EFFECT))
+	return clamp((target_demand - stock) / target_demand, -1.0, 1.0) * effect
 
 
 func _get_input_cost_pressure(market_id: String, good_id: String) -> float:
@@ -533,6 +590,22 @@ func _get_willingness(price: float, min_price: float, max_price: float, elastici
 		return 0.0
 	var price_range = max(1.0, max_price - min_price)
 	return pow(clamp((max_price - price) / price_range, 0.0, 1.0), max(0.1, elasticity))
+
+
+func _sample_normal(mean: float, deviation: float) -> float:
+	if deviation <= 0.0:
+		return mean
+	var first = max(0.000001, _rng.randf())
+	var second = _rng.randf()
+	var standard_normal = sqrt(-2.0 * log(first)) * cos(2.0 * PI * second)
+	return mean + standard_normal * deviation
+
+
+func _sum_float_array(values: Array) -> float:
+	var total = 0.0
+	for value in values:
+		total += float(value)
+	return total
 
 
 func _get_scarcity_label(market: Dictionary, good_id: String) -> String:
@@ -645,6 +718,18 @@ func _get_route_pressure(market: Dictionary) -> Dictionary:
 
 func _get_desire(market: Dictionary) -> Dictionary:
 	return market["desire"]
+
+
+func _get_daily_demand_target(market: Dictionary) -> Dictionary:
+	return market["daily_demand_target"]
+
+
+func _get_demand_history(market: Dictionary) -> Dictionary:
+	return market["demand_history"]
+
+
+func _get_target_demand(market: Dictionary) -> Dictionary:
+	return market["target_demand"]
 
 
 func _get_market_segments(market: Dictionary) -> Dictionary:
