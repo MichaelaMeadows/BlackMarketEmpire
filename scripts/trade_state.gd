@@ -39,6 +39,14 @@ var trade_sources: Dictionary = {
 		"legality": LEGALITY_ILLICIT,
 		"unlocked": false,
 	},
+	"packaging_stock": {"id": "packing_wholesaler", "name": "Packaging Stock", "source_name": "Packing Wholesaler", "buy_price": 5, "sell_price": 7, "distance": 4, "distance_label": "4 blocks", "source_inventory": SOURCE_INFINITE, "unit_weight_kg": 1, "legality": LEGALITY_LEGAL, "unlocked": false},
+	"clean_textiles": {"id": "textile_clearance", "name": "Clean Textiles", "source_name": "Textile Clearance", "buy_price": 9, "sell_price": 12, "distance": 5, "distance_label": "5 blocks", "source_inventory": SOURCE_INFINITE, "unit_weight_kg": 1, "legality": LEGALITY_LEGAL, "unlocked": false},
+	"paper_forms": {"id": "office_surplus", "name": "Paper Forms", "source_name": "Office Surplus", "buy_price": 6, "sell_price": 8, "distance": 3, "distance_label": "3 blocks", "source_inventory": SOURCE_INFINITE, "unit_weight_kg": 1, "legality": LEGALITY_LEGAL, "unlocked": false},
+	"repair_parts": {"id": "repair_counter", "name": "Repair Parts", "source_name": "Repair Counter", "buy_price": 18, "sell_price": 24, "distance": 6, "distance_label": "6 blocks", "source_inventory": SOURCE_INFINITE, "unit_weight_kg": 2, "legality": LEGALITY_LEGAL, "unlocked": false},
+	"industrial_supplies": {"id": "industrial_surplus", "name": "Industrial Supplies", "source_name": "Industrial Surplus", "buy_price": 10, "sell_price": 14, "distance": 6, "distance_label": "6 blocks", "source_inventory": SOURCE_INFINITE, "unit_weight_kg": 2, "legality": LEGALITY_LEGAL, "unlocked": false},
+	"plain_wraps": {"id": "base_production_plain_wraps", "name": "Plain Wraps", "source_name": "Base Production", "buy_price": 14, "sell_price": 18, "distance": 0, "distance_label": "Made at base", "source_inventory": 0, "unit_weight_kg": 1, "legality": LEGALITY_LEGAL, "buy_enabled": false, "unlocked": false},
+	"clean_labels": {"id": "base_production_clean_labels", "name": "Clean Labels", "source_name": "Base Production", "buy_price": 28, "sell_price": 36, "distance": 0, "distance_label": "Made at base", "source_inventory": 0, "unit_weight_kg": 1, "legality": LEGALITY_LEGAL, "buy_enabled": false, "unlocked": false},
+	"burner_parts": {"id": "base_production_burner_parts", "name": "Burner Parts", "source_name": "Base Production", "buy_price": 36, "sell_price": 48, "distance": 0, "distance_label": "Made at base", "source_inventory": 0, "unit_weight_kg": 2, "legality": LEGALITY_LEGAL, "buy_enabled": false, "unlocked": false},
 }
 var active_orders: Dictionary = {}
 var active_trips: Dictionary = {}
@@ -48,6 +56,8 @@ var next_trip_id := 1
 
 
 func buy_from_supplier(context: Dictionary, quantity: int = 1, unit_price: int = -1, good_id: String = DEFAULT_GOOD_ID) -> Dictionary:
+	if not bool(get_source(good_id).get("buy_enabled", true)):
+		return _result(false, "That product must be made at the base.")
 	if unit_price < 0:
 		unit_price = get_current_buy_price(context, good_id)
 	var total_cost := quantity * unit_price
@@ -85,6 +95,8 @@ func place_buy_order(context: Dictionary, quantity: int = -1, unit_price: int = 
 		return _result(false, "No transporter is available.")
 	if not is_good_unlocked(good_id):
 		return _result(false, "That product is not available yet.")
+	if not bool(get_source(good_id).get("buy_enabled", true)):
+		return _result(false, "That product must be made at the base.")
 	if unit_price < 0:
 		unit_price = get_current_buy_price(context, good_id)
 	if unit_price <= 0:
@@ -302,6 +314,7 @@ func get_available_goods(context: Dictionary) -> Array:
 			"distance": int(source.get("distance", 0)), "distance_label": get_distance_label(good_id),
 			"base_inventory": _get_stock(context, good_id), "available_sell_inventory": get_available_sell_stock(context, good_id),
 			"remote_inventory": get_remote_inventory(context, good_id), "remote_inventory_label": get_remote_inventory_label(context, good_id),
+			"buy_enabled": bool(source.get("buy_enabled", true)),
 			"legality": get_good_legality(good_id), "legality_label": format_legality_label(get_good_legality(good_id)), "legal": is_good_legal(good_id),
 		})
 	return goods

@@ -30,6 +30,8 @@ The current scaffold implements:
 - Grow toward larger bases by accumulating cash, crew, facilities, and raid results.
 - Track district-level fictional markets with diverse goods, local prices, production recipes, consumer willingness bands, habit pressure, and slow trade between connected districts.
 - Track unlocks and triggered events through data-driven progression rules fed by gameplay facts like sales, item movement, days, production, and kills.
+- Follow a short introductory mission chain through buying, delivery, selling, hiring muscle, squad commands, and the first depot raid; after that raid, guidance ends and play becomes open-ended.
+- Completing the introductory depot raid opens intermediate suppliers and starter workbench production. Player production consumes physical base inventory and creates sellable output over game time.
 
 This is deliberately small. It exists to prove input, state, interaction, and HUD flow.
 
@@ -40,7 +42,7 @@ This is deliberately small. It exists to prove input, state, interaction, and HU
 - Add rival crews with territory influence.
 - Add day/night cycles and timed market changes.
 - Add heat sources that respond to player behavior.
-- Add missions that introduce mechanics one at a time.
+- Expand or refine the short introductory missions only when a new core mechanic needs teaching; missions are onboarding, not a permanent linear campaign.
 - Expand tactical action scenes for raids, ambushes, and escapes.
 
 ## Technical Direction
@@ -62,9 +64,14 @@ This is deliberately small. It exists to prove input, state, interaction, and HU
 - Trade source availability, order/trip lifecycle, inventory reservations, manifests, and transporter dispatch live in `TradeState`. `GameState` remains the stable facade that supplies cross-domain context, emits global state changes, and forwards progression effects; world movement must report transitions through that facade rather than mutate trade records directly.
 - Local markets advance in daily ticks: anchor supply, production, consumer demand, route trade, price recalculation, trend updates, and habit/desire updates.
 - Progression rules live in JSON under `data/progression/` and should consume generic events/metrics instead of being hardcoded into individual gameplay systems.
+- Intro missions live in `data/progression/intro_missions.json`, advance sequentially from successful gameplay events, and explicitly end in open play rather than becoming an endless quest log.
+- Player production recipes live in `data/production/base_recipes.json`. `BaseProductionState` owns facility jobs, input reservation/refunds, worker requirements, timers, output-space waiting, and completion; `GameState` remains the facade that supplies base context and forwards crafted progression events.
+- AI squad intent must yield to explicit world jobs such as raid departure. Departure paths choose a reachable navigation exit instead of the geometrically nearest map edge.
+- Newly hired crew use a short arrival job that temporarily owns movement, settles within a practical radius, and clears on stalled or excessive travel time. Squad AI resumes immediately afterward so arrival never becomes a permanent hidden assignment.
 - Character health and weapons are component-style scripts. Keep combat simple and data-driven until there is a clear need for richer AI or weapon inheritance.
 - Projectiles are the first weapon delivery type. Future weapons should extend data first, then specialized scripts only when behavior meaningfully differs.
 - Combat AI is component-style and opt-in from unit data. Units use explicit factions and hostile faction lists, then make decisions for sight, weapon-range engagement, reaction timing, target memory, shooting, chasing, scored cover, suppression response, squad target sharing, squad spacing, and optional follow-anchor cohesion.
+- Player combat crew accepts persistent whole-squad Follow, Attack, and Hold intent. Orders constrain or prioritize the reactive combat states rather than replacing them: Attack prioritizes a chosen hostile, Hold defends per-unit anchors within a limited engagement area, and Follow restores player-anchor cohesion.
 - Gunplay remains data-first: weapon type, accuracy, movement spread, recoil, magazines, reloads, bursts, projectile count, projectile arc, and effective/preferred range should be tuned through weapon dictionaries before adding specialized weapon scripts.
 
 ## Tone

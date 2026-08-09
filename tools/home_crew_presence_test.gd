@@ -16,7 +16,7 @@ func _run() -> void:
 	await process_frame
 
 	await _test_sent_raid_waits_for_crew_to_leave(main)
-	_test_hired_crew_walks_onto_home_map(main)
+	await _test_hired_crew_walks_onto_home_map(main)
 	await _test_two_hired_thugs_enable_enemy_thug_attack(main)
 
 	main.queue_free()
@@ -81,6 +81,7 @@ func _test_hired_crew_walks_onto_home_map(main) -> void:
 	_expect(npc != null and npc.get("gun") == null, "hired thug has no gun on the map")
 	_expect(npc != null and npc.get("melee_weapon") != null, "hired thug has a melee weapon on the map")
 	_expect(main.active_crew_arrivals.has(hired_id), "hired crew starts with an arrival walk")
+	_expect(npc != null and npc.get("combat_ai") != null and not bool(npc.get("combat_ai").get("enabled")), "arrival walk owns movement instead of fighting follow AI")
 	if npc == null or not main.active_crew_arrivals.has(hired_id):
 		return
 
@@ -95,6 +96,31 @@ func _test_hired_crew_walks_onto_home_map(main) -> void:
 	_expect(npc.position.distance_to(target) < starting_distance, "hired crew moves toward their base spot")
 	_expect(not main.active_crew_arrivals.has(hired_id), "hired crew finishes arrival and stays at base")
 	_expect(main._find_spawned_npc_by_id(hired_id) == npc, "hired crew remains present after arriving")
+	_expect(bool(npc.get("combat_ai").get("enabled")), "finishing arrival restores squad AI")
+	main._begin_crew_arrival(hired_id, npc, npc.position + Vector2(12.0, 0.0))
+	main._update_crew_arrivals(0.1)
+	_expect(not main.active_crew_arrivals.has(hired_id), "arrival clears as soon as crew is within the settle distance")
+	_expect(bool(npc.get("combat_ai").get("enabled")), "early arrival settlement restores squad AI")
+
+	# Recreate the real onboarding timing: the player can send a recent hire while
+	# its arrival walk is still active.
+	main._begin_crew_arrival(hired_id, npc, main.player.position)
+	main._on_raid_send_requested("abandoned_depot", [hired_id])
+	_expect(npc.get("combat_ai") != null, "hired raid crew has follow AI")
+	_expect(not bool(npc.get("combat_ai").get("enabled")), "raid departure suspends the follow AI")
+	_expect(not main.active_crew_arrivals.has(hired_id), "raid departure cancels a pending hire arrival walk")
+	for _index in range(240):
+		main._process(0.1)
+		await process_frame
+		if str(state.get_active_raid_target().get("mode", "")) == "sent":
+			break
+	_expect(str(state.get_active_raid_target().get("mode", "")) == "sent", "AI-controlled crew reaches the exit instead of following the player")
+	for _index in range(80):
+		main._process(0.1)
+		await process_frame
+		if state.get_active_raid_target().is_empty():
+			break
+	await process_frame
 
 
 func _test_two_hired_thugs_enable_enemy_thug_attack(main) -> void:

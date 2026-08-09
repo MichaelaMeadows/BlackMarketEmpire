@@ -11,6 +11,9 @@ func _init() -> void:
 	_test_corner_clock_exists()
 	_test_hire_role_filter_exists()
 	_test_raid_send_picker_exists()
+	_test_squad_command_controls_exist()
+	_test_intro_mission_hud_exists()
+	_test_production_app_exists()
 
 	if _failures == 0:
 		print("Phone UI compile tests passed.")
@@ -61,6 +64,36 @@ func _test_raid_send_picker_exists() -> void:
 	_expect(phone_source.contains("Enemy killed"), "raids screen shows opponent losses")
 	_expect(main_source.contains("raid_send_requested.connect(_on_raid_send_requested)"), "main handles sent raid requests")
 	_expect(main_source.contains("_update_sent_raid"), "main resolves sent raids after travel time")
+
+
+func _test_squad_command_controls_exist() -> void:
+	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
+	var ai_source := FileAccess.get_file_as_string("res://scripts/combat_ai_controller.gd")
+	_expect(main_source.contains("[1] Follow"), "HUD exposes a squad follow button and key")
+	_expect(main_source.contains("[2] Attack"), "HUD exposes a squad attack button and key")
+	_expect(main_source.contains("[3] Hold"), "HUD exposes a squad hold button and key")
+	_expect(main_source.contains("_try_issue_squad_attack_at"), "main supports click-targeted squad attacks")
+	_expect(ai_source.contains("func issue_follow_order"), "combat AI accepts follow orders")
+	_expect(ai_source.contains("func issue_attack_order"), "combat AI accepts attack orders")
+	_expect(ai_source.contains("func issue_hold_order"), "combat AI accepts hold orders")
+
+
+func _test_intro_mission_hud_exists() -> void:
+	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
+	var state_source := FileAccess.get_file_as_string("res://scripts/autoload/game_state.gd")
+	_expect(main_source.contains("mission_title_label"), "HUD exposes the current intro mission")
+	_expect(main_source.contains("_refresh_intro_mission"), "HUD refreshes mission progress")
+	_expect(state_source.contains("INTRO_MISSION_DATA_PATH"), "GameState loads data-driven intro missions")
+	_expect(state_source.contains("record_intro_mission_event"), "GameState accepts gameplay events for intro missions")
+
+
+func _test_production_app_exists() -> void:
+	var phone_source := FileAccess.get_file_as_string("res://scripts/phone_ui.gd")
+	var state_source := FileAccess.get_file_as_string("res://scripts/autoload/game_state.gd")
+	_expect(phone_source.contains("_build_production_app"), "phone exposes production management")
+	_expect(phone_source.contains("Start Batch"), "production app can start a batch")
+	_expect(state_source.contains("start_base_production"), "GameState exposes base production commands")
+	_expect(state_source.contains("advance_base_production"), "base production advances with game time")
 
 
 func _expect(condition: bool, message: String) -> void:

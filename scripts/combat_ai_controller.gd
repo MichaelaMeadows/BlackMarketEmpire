@@ -1,15 +1,27 @@
 extends Node
 class_name CombatAiController
 
+const HOLD_ARRIVAL_DISTANCE := 10.0
+const HOLD_REPOSITION_DISTANCE := 28.0
+
 enum AiState {
 	IDLE,
 	FOLLOWING,
+	MOVING_TO_ORDER,
+	HOLDING,
 	CHASING,
 	ATTACKING,
 	TAKING_COVER,
 	IN_COVER,
 	PEEKING,
 	RELOADING_IN_COVER,
+}
+
+enum OrderType {
+	AUTONOMOUS,
+	FOLLOW,
+	ATTACK,
+	HOLD,
 }
 
 @export var enabled := true
@@ -30,6 +42,7 @@ enum AiState {
 @export var cover_reuse_seconds := 0.7
 @export var suppression_cover_threshold := 1.0
 @export var hold_distance_tolerance := 48.0
+@export var default_hold_radius := 220.0
 
 var owner_unit: CharacterBody2D
 var faction := "neutral"
@@ -47,6 +60,11 @@ var time_since_seen_target := 0.0
 var suppression_remaining := 0.0
 var cover_reuse_remaining := 0.0
 var state := AiState.IDLE
+var order_type := OrderType.AUTONOMOUS
+var order_target: Node2D
+var order_position := Vector2.ZERO
+var order_hold_radius := 220.0
+var hold_anchor_reached := false
 var _uses_weapon_attack_range := true
 var _uses_weapon_preferred_range := true
 var navigation
@@ -77,6 +95,8 @@ func setup(new_owner: CharacterBody2D, config: Dictionary = {}) -> void:
 	cover_reuse_seconds = max(0.0, float(config.get("cover_reuse_seconds", cover_reuse_seconds)))
 	suppression_cover_threshold = max(0.0, float(config.get("suppression_cover_threshold", suppression_cover_threshold)))
 	hold_distance_tolerance = max(0.0, float(config.get("hold_distance_tolerance", hold_distance_tolerance)))
+	default_hold_radius = max(32.0, float(config.get("default_hold_radius", default_hold_radius)))
+	order_hold_radius = default_hold_radius
 	if config.has("navigation"):
 		set_navigation(config.get("navigation"))
 	add_to_group("combat_ai")
@@ -92,6 +112,52 @@ func set_follow_target(target: Node2D, distance: float = -1.0, leash: float = -1
 		desired_follow_distance = distance
 	if leash >= 0.0:
 		combat_follow_leash = leash
+
+
+func issue_follow_order(target: Node2D = null) -> void:
+	if target != null:
+		set_follow_target(target)
+	order_type = OrderType.FOLLOW
+	order_target = null
+	hold_anchor_reached = false
+	_set_current_target(null, 0.0)
+
+
+func issue_attack_order(target: Node2D) -> bool:
+	if target == null or not _is_valid_target(target) or not is_hostile(target):
+		return false
+	order_type = OrderType.ATTACK
+	order_target = target
+	hold_anchor_reached = false
+	_set_current_target(target, 1.0)
+	return true
+
+
+func issue_hold_order(position: Vector2, radius: float = -1.0) -> void:
+	order_type = OrderType.HOLD
+	order_target = null
+	order_position = position
+	order_hold_radius = default_hold_radius if radius < 0.0 else max(32.0, radius)
+	hold_anchor_reached = owner_unit != null and owner_unit.global_position.distance_to(order_position) <= HOLD_ARRIVAL_DISTANCE
+	_set_current_target(null, 0.0)
+
+
+func clear_order() -> void:
+	order_type = OrderType.AUTONOMOUS
+	order_target = null
+	hold_anchor_reached = false
+	_set_current_target(null, 0.0)
+
+
+func get_order_name() -> String:
+	match order_type:
+		OrderType.FOLLOW:
+			return "FOLLOW"
+		OrderType.ATTACK:
+			return "ATTACK"
+		OrderType.HOLD:
+			return "HOLD"
+	return "AUTONOMOUS"
 
 
 func clear_follow_target() -> void:
@@ -129,6 +195,10 @@ func receive_shared_target(target: Node2D, ally: Node2D, confidence: float = 0.5
 		return
 	if not _is_valid_target(target) or not is_hostile(target):
 		return
+	if order_type == OrderType.ATTACK and target != order_target:
+		return
+	if not _is_target_allowed_by_order(target):
+		return
 	if not _is_same_squad_or_faction(ally):
 		return
 	if owner_unit.global_position.distance_to(ally.global_position) > ally_alert_radius:
@@ -154,6 +224,10 @@ func get_state_name() -> String:
 			return "IDLE"
 		AiState.FOLLOWING:
 			return "FOLLOWING"
+		AiState.MOVING_TO_ORDER:
+			return "MOVING_TO_ORDER"
+		AiState.HOLDING:
+			return "HOLDING"
 		AiState.CHASING:
 			return "CHASING"
 		AiState.ATTACKING:
@@ -185,6 +259,21 @@ func tick_ai(_delta: float) -> void:
 	cover_reuse_remaining = max(0.0, cover_reuse_remaining - _delta)
 	suppression_remaining = max(0.0, suppression_remaining - _delta)
 	aim_confidence = min(1.0, aim_confidence + _delta)
+
+	if order_type == OrderType.ATTACK:
+		if not _is_valid_target(order_target):
+			order_target = null
+			order_type = OrderType.FOLLOW if follow_target != null and is_instance_valid(follow_target) else OrderType.AUTONOMOUS
+			_set_current_target(null, 0.0)
+		else:
+			_set_current_target(order_target, 1.0)
+			last_seen_position = order_target.global_position
+			has_last_seen_position = true
+			if can_see(order_target):
+				_act_against_visible_target(order_target)
+			else:
+				_chase_position(order_target.global_position)
+			return
 
 	if not _is_valid_target(current_target):
 		_set_current_target(find_visible_hostile(), 1.0)
@@ -221,6 +310,8 @@ func find_visible_hostile() -> Node2D:
 		if not _is_valid_target(candidate):
 			continue
 		if not is_hostile(candidate):
+			continue
+		if not _is_target_allowed_by_order(candidate):
 			continue
 
 		var distance: float = owner_unit.global_position.distance_to(candidate.global_position)
@@ -262,8 +353,26 @@ func can_see(target: Node2D, max_distance: float = -1.0) -> bool:
 
 
 func _act_against_visible_target(target: Node2D) -> void:
+	if order_type == OrderType.HOLD:
+		if not _is_target_allowed_by_order(target):
+			_set_current_target(null, 0.0)
+			_follow_anchor_or_idle()
+			return
+		if _should_return_to_hold_anchor():
+			state = AiState.MOVING_TO_ORDER
+			_move_toward(order_position, follow_speed)
+			_aim_at(target)
+			return
+		state = AiState.ATTACKING
+		_stop()
+		if owner_unit.global_position.distance_to(target.global_position) <= attack_range and reaction_remaining <= 0.0:
+			_fire_at(target)
+		else:
+			_aim_at(target)
+		return
+
 	var follow_destination = _get_combat_follow_destination()
-	if follow_destination != null:
+	if order_type != OrderType.ATTACK and order_type != OrderType.HOLD and follow_destination != null:
 		state = AiState.FOLLOWING
 		_move_toward(follow_destination, follow_speed)
 		_aim_at(target)
@@ -314,7 +423,7 @@ func _act_against_visible_target(target: Node2D) -> void:
 
 func _chase_position(destination: Vector2) -> void:
 	var follow_destination = _get_combat_follow_destination()
-	if follow_destination != null:
+	if order_type != OrderType.ATTACK and order_type != OrderType.HOLD and follow_destination != null:
 		state = AiState.FOLLOWING
 		_move_toward(follow_destination, follow_speed)
 		return
@@ -330,6 +439,15 @@ func _chase_position(destination: Vector2) -> void:
 
 
 func _follow_anchor_or_idle() -> void:
+	if order_type == OrderType.HOLD:
+		if _should_return_to_hold_anchor():
+			state = AiState.MOVING_TO_ORDER
+			_move_toward(order_position, follow_speed)
+			return
+		state = AiState.HOLDING
+		_stop()
+		return
+
 	if follow_target != null and is_instance_valid(follow_target):
 		var follow_destination: Vector2 = _get_follow_destination()
 		var distance: float = owner_unit.global_position.distance_to(follow_destination)
@@ -358,6 +476,8 @@ func _get_follow_destination() -> Vector2:
 
 
 func _move_toward(destination: Vector2, speed: float) -> void:
+	if order_type == OrderType.HOLD:
+		destination = _constrain_to_hold_area(destination)
 	var waypoint := _get_navigation_waypoint(destination)
 	var offset: Vector2 = waypoint - owner_unit.global_position
 	if offset.length() <= 8.0:
@@ -443,8 +563,8 @@ func _find_cover_position(target: Node2D) -> Vector2:
 		var away: Vector2 = owner_unit.global_position - target.global_position
 		if away.length() <= 0.01:
 			away = Vector2.RIGHT
-		return owner_unit.global_position + away.normalized() * cover_search_radius
-	return best_position
+		return _constrain_to_hold_area(owner_unit.global_position + away.normalized() * cover_search_radius)
+	return _constrain_to_hold_area(best_position)
 
 
 func _find_navigation_cover_position(target: Node2D):
@@ -454,6 +574,7 @@ func _find_navigation_cover_position(target: Node2D):
 	if cover.is_empty() or not cover.has("position"):
 		return null
 	var position: Vector2 = cover.get("position", owner_unit.global_position)
+	position = _constrain_to_hold_area(position)
 	if _is_cover_candidate_occupied(position):
 		return null
 	return position
@@ -566,6 +687,31 @@ func _is_valid_target(target) -> bool:
 	if not (target is Node2D):
 		return false
 	return not _is_dead(target)
+
+
+func _is_target_allowed_by_order(target: Node2D) -> bool:
+	if order_type != OrderType.HOLD:
+		return true
+	return target.global_position.distance_to(order_position) <= order_hold_radius
+
+
+func _constrain_to_hold_area(destination: Vector2) -> Vector2:
+	if order_type != OrderType.HOLD:
+		return destination
+	var offset := destination - order_position
+	if offset.length() <= order_hold_radius:
+		return destination
+	return order_position + offset.normalized() * order_hold_radius
+
+
+func _should_return_to_hold_anchor() -> bool:
+	var distance := owner_unit.global_position.distance_to(order_position)
+	if hold_anchor_reached:
+		if distance > HOLD_REPOSITION_DISTANCE:
+			hold_anchor_reached = false
+	elif distance <= HOLD_ARRIVAL_DISTANCE:
+		hold_anchor_reached = true
+	return not hold_anchor_reached
 
 
 func _is_line_of_sight_transparent(collider: Node) -> bool:

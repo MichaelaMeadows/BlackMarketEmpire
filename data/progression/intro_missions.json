@@ -1,0 +1,61 @@
+{
+  "final_title": "Operation Open",
+  "final_message": "You know how to move goods, build a crew, give orders, and hit a target. Intermediate suppliers and the base workbench are now available. From here, the operation is yours to grow.",
+  "missions": [
+    {
+      "id": "first_order",
+      "title": "First Run",
+      "description": "Open Phone > Market and place a buy order for Fast Food. Benji can carry one small load.",
+      "event_type": "trade_order_placed",
+      "matches": {"order_type": "buy", "good_id": "fast_food"},
+      "progress_label": "Buy order",
+      "target": 1
+    },
+    {
+      "id": "receive_first_goods",
+      "title": "Stock the House",
+      "description": "Let Benji finish the trip. The order is complete when the goods reach storage.",
+      "event_type": "trade_buy_delivered",
+      "matches": {"good_id": "fast_food"},
+      "increment_field": "quantity",
+      "progress_label": "Units delivered",
+      "target": 1
+    },
+    {
+      "id": "complete_first_sale",
+      "title": "Make the Sale",
+      "description": "Use Phone > Market to sell Fast Food, then wait for Benji to return with the cash.",
+      "event_type": "trade_sale_completed",
+      "matches": {"good_id": "fast_food"},
+      "increment_field": "quantity",
+      "progress_label": "Units sold",
+      "target": 1
+    },
+    {
+      "id": "hire_muscle",
+      "title": "Hire Protection",
+      "description": "Open Phone > Hire and recruit one Muscle candidate. Trade earnings pay the hiring cost.",
+      "event_type": "crew_hired",
+      "matches": {"role": "muscle"},
+      "progress_label": "Muscle hired",
+      "target": 1
+    },
+    {
+      "id": "command_crew",
+      "title": "Take Control",
+      "description": "Give your combat crew an order with 1 Follow, 2 Attack, or 3 Hold.",
+      "event_type": "squad_order_issued",
+      "progress_label": "Orders issued",
+      "target": 1
+    },
+    {
+      "id": "complete_depot_raid",
+      "title": "Hit the Depot",
+      "description": "Open Phone > Raids and complete the Abandoned Depot raid. Join the crew or send them without you.",
+      "event_type": "raid_completed",
+      "matches": {"target_id": "abandoned_depot"},
+      "progress_label": "Depot raids completed",
+      "target": 1
+    }
+  ]
+}

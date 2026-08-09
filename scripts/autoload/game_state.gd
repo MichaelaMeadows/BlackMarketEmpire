@@ -3,14 +3,20 @@ extends Node
 signal state_changed
 signal progression_event_triggered(event: Dictionary)
 signal crew_hired(crew_member: Dictionary)
+signal intro_mission_changed(snapshot: Dictionary, transition: Dictionary)
 
 const MARKET_SIMULATION_SCRIPT = preload("res://scripts/market_simulation.gd")
 const PROGRESSION_TRACKER_SCRIPT = preload("res://scripts/progression_tracker.gd")
 const NPC_ROLE_CATALOG_SCRIPT = preload("res://scripts/npc_role_catalog.gd")
 const NAME_GENERATOR_SCRIPT = preload("res://scripts/name_generator.gd")
 const TRADE_STATE_SCRIPT = preload("res://scripts/trade_state.gd")
+const INTRO_MISSION_TRACKER_SCRIPT = preload("res://scripts/intro_mission_tracker.gd")
+const BASE_PRODUCTION_STATE_SCRIPT = preload("res://scripts/base_production_state.gd")
 const ECONOMY_DATA_PATH = "res://data/economy"
 const PROGRESSION_DATA_PATH = "res://data/progression/unlock_rules.json"
+const INTRO_MISSION_DATA_PATH = "res://data/progression/intro_missions.json"
+const BASE_PRODUCTION_DATA_PATH = "res://data/production/base_recipes.json"
+const PRODUCTION_TRADE_GOODS := ["packaging_stock", "clean_textiles", "paper_forms", "repair_parts", "industrial_supplies", "plain_wraps", "clean_labels", "burner_parts"]
 const GOOD_KEY = "fast_food"
 const STARTING_MARKET_ID = "rook_market"
 const DAYS_PER_WEEK = 7
@@ -56,6 +62,8 @@ var player_health: int = 100
 var player_max_health: int = 100
 var market
 var progression
+var intro_missions
+var base_production
 var hire_name_generator = NAME_GENERATOR_SCRIPT.new(4177)
 var inventory: Dictionary = {
 	"fast_food": 0,
@@ -94,6 +102,8 @@ var last_raid_report: Dictionary = {}
 func _ready() -> void:
 	_ensure_market()
 	_ensure_progression()
+	_ensure_intro_missions()
+	_ensure_base_production()
 	product_name = str(market.get_good(GOOD_KEY).get("name", product_name))
 	storage_inventory[GOOD_KEY] = get_stock()
 	_ensure_hire_candidates()
@@ -111,7 +121,14 @@ func sell_to_buyer(quantity: int = 1, unit_price: int = -1, good_id: String = GO
 
 func place_buy_order(quantity: int = -1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
 	var context := _trade_context()
-	return _complete_trade_action(context, trade_state.place_buy_order(context, quantity, unit_price, good_id))
+	var result := _complete_trade_action(context, trade_state.place_buy_order(context, quantity, unit_price, good_id))
+	if bool(result.get("ok", false)):
+		var order: Dictionary = result.get("order", {})
+		record_intro_mission_event("trade_order_placed", {
+			"order_type": "buy", "good_id": str(order.get("good_id", good_id)),
+			"quantity": int(order.get("total_quantity", 0)),
+		})
+	return result
 
 
 func place_sell_order(quantity: int = -1, unit_price: int = -1, good_id: String = GOOD_KEY) -> Dictionary:
@@ -125,13 +142,25 @@ func pick_up_sell_order(trip_id: String) -> Dictionary:
 
 
 func deposit_buy_order(trip_id: String) -> Dictionary:
+	var trip := trade_state.get_trip(trip_id)
 	var context := _trade_context()
-	return _complete_trade_action(context, trade_state.deposit_buy_order(context, trip_id), true)
+	var result := _complete_trade_action(context, trade_state.deposit_buy_order(context, trip_id), true)
+	if bool(result.get("ok", false)) and not trip.is_empty():
+		record_intro_mission_event("trade_buy_delivered", {
+			"good_id": str(trip.get("good_id", GOOD_KEY)), "quantity": int(trip.get("quantity", 0)),
+		})
+	return result
 
 
 func complete_sell_order(trip_id: String) -> Dictionary:
+	var trip := trade_state.get_trip(trip_id)
 	var context := _trade_context()
-	return _complete_trade_action(context, trade_state.complete_sell_order(context, trip_id), true)
+	var result := _complete_trade_action(context, trade_state.complete_sell_order(context, trip_id), true)
+	if bool(result.get("ok", false)) and not trip.is_empty():
+		record_intro_mission_event("trade_sale_completed", {
+			"good_id": str(trip.get("good_id", GOOD_KEY)), "quantity": int(trip.get("quantity", 0)),
+		})
+	return result
 
 
 func get_trade_orders() -> Array:
@@ -309,6 +338,11 @@ func hire_employee(candidate_id: String) -> Dictionary:
 	hire_candidates.remove_at(candidate_index)
 	var result := _result(true, "Hired %s for $%d." % [str(crew_member.get("name", "Crew")), price])
 	result["crew_member"] = crew_member.duplicate(true)
+	record_intro_mission_event("crew_hired", {
+		"crew_id": str(crew_member.get("id", "")),
+		"role": str(crew_member.get("role", "")),
+		"archetype": str(crew_member.get("archetype", "")),
+	})
 	crew_hired.emit(crew_member.duplicate(true))
 	state_changed.emit()
 	return result
@@ -370,6 +404,7 @@ func advance_game_time(delta_seconds: float) -> Dictionary:
 			"clock_changed": false,
 		}
 	var previous_minute: int = _get_clock_minute_of_day()
+	advance_base_production(delta_seconds)
 	day_time_seconds += delta_seconds
 	var days_advanced: int = 0
 	while day_time_seconds >= DAY_LENGTH_SECONDS:
@@ -577,6 +612,47 @@ func get_storage_snapshot() -> Dictionary:
 	}
 
 
+func get_base_production_rows() -> Array:
+	_ensure_base_production()
+	return base_production.get_recipe_rows(_base_production_context())
+
+
+func get_base_production_jobs() -> Array:
+	_ensure_base_production()
+	return base_production.get_jobs()
+
+
+func start_base_production(facility_id: String, recipe_id: String) -> Dictionary:
+	_ensure_base_production()
+	var result: Dictionary = base_production.start_job(_base_production_context(), facility_id, recipe_id)
+	if bool(result.get("ok", false)):
+		state_changed.emit()
+	return result
+
+
+func cancel_base_production(facility_id: String) -> Dictionary:
+	_ensure_base_production()
+	var result: Dictionary = base_production.cancel_job(_base_production_context(), facility_id)
+	if bool(result.get("ok", false)):
+		state_changed.emit()
+	return result
+
+
+func advance_base_production(delta_seconds: float) -> Array:
+	_ensure_base_production()
+	var completed: Array = base_production.advance(_base_production_context(), delta_seconds)
+	for batch in completed:
+		if batch is Dictionary:
+			record_progression_event("crafted", {
+				"item_id": str(batch.get("good_id", "")),
+				"quantity": int(batch.get("quantity", 0)),
+				"facility_id": str(batch.get("facility_id", "")),
+			})
+	if not completed.is_empty():
+		state_changed.emit()
+	return completed
+
+
 func get_raid_targets() -> Array:
 	return raid_targets.duplicate(true)
 
@@ -721,6 +797,9 @@ func complete_active_raid(success: bool = true) -> Dictionary:
 			"target_id": str(active_raid_target.get("id", "")),
 			"metrics": {"raids_completed": 1},
 		})
+		record_intro_mission_event("raid_completed", {
+			"target_id": str(active_target.get("id", "")),
+		})
 	if is_sent_raid:
 		_apply_sent_raid_report(report)
 		last_raid_report = report
@@ -825,6 +904,25 @@ func record_progression_event(event_type: String, payload: Dictionary = {}) -> A
 	return triggered
 
 
+func record_intro_mission_event(event_type: String, payload: Dictionary = {}) -> Dictionary:
+	_ensure_intro_missions()
+	var transition: Dictionary = intro_missions.record_event(event_type, payload)
+	if not bool(transition.get("changed", false)):
+		return transition
+	if bool(transition.get("intro_complete", false)):
+		for good_id in PRODUCTION_TRADE_GOODS:
+			trade_state.unlock_good(str(good_id))
+	var snapshot: Dictionary = intro_missions.get_snapshot()
+	intro_mission_changed.emit(snapshot, transition)
+	state_changed.emit()
+	return transition
+
+
+func get_intro_mission_snapshot() -> Dictionary:
+	_ensure_intro_missions()
+	return intro_missions.get_snapshot()
+
+
 func record_kill(target_type: String = "npc") -> Array:
 	return record_progression_event("kill", {
 		"target_type": target_type,
@@ -886,6 +984,20 @@ func _ensure_progression() -> void:
 		return
 	progression = PROGRESSION_TRACKER_SCRIPT.new()
 	progression.load_rules(PROGRESSION_DATA_PATH)
+
+
+func _ensure_intro_missions() -> void:
+	if intro_missions != null:
+		return
+	intro_missions = INTRO_MISSION_TRACKER_SCRIPT.new()
+	intro_missions.load_missions(INTRO_MISSION_DATA_PATH)
+
+
+func _ensure_base_production() -> void:
+	if base_production != null:
+		return
+	base_production = BASE_PRODUCTION_STATE_SCRIPT.new()
+	base_production.load_recipes(BASE_PRODUCTION_DATA_PATH)
 
 
 func _ensure_hire_candidates() -> void:
@@ -1346,6 +1458,25 @@ func _trade_context() -> Dictionary:
 		"crew_roster": crew_roster,
 		"market": market,
 		"active_market_id": active_market_id,
+	}
+
+
+func _base_production_context() -> Dictionary:
+	_ensure_market()
+	var unit_weights: Dictionary = {}
+	var good_names: Dictionary = {}
+	for value in market.goods.keys():
+		var good_id := str(value)
+		unit_weights[good_id] = trade_state.get_unit_weight_kg(good_id)
+		good_names[good_id] = trade_state.get_good_name(_trade_context(), good_id)
+	return {
+		"inventory": inventory,
+		"storage_inventory": storage_inventory,
+		"storage_capacity": storage_capacity,
+		"facilities": base_facilities,
+		"ready_production_workers": get_ready_crew_count("production"),
+		"unit_weights": unit_weights,
+		"good_names": good_names,
 	}
 
 

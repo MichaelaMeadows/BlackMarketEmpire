@@ -45,6 +45,7 @@ var orders_refresh_timer := 0.0
 var hire_list: GridContainer
 var hire_status_label: Label
 var hire_message := ""
+var production_message := ""
 var hire_role_filter := "all"
 var raid_status_label: Label
 var selected_raid_target_id := ""
@@ -141,6 +142,7 @@ func _build_ui() -> void:
 	layout.add_child(app_bar)
 
 	_add_app_button(app_bar, "Base", "base")
+	_add_app_button(app_bar, "Production", "production")
 	_add_app_button(app_bar, "Crew", "crew")
 	_add_app_button(app_bar, "Raids", "raids")
 	_add_app_button(app_bar, "Map", "map")
@@ -193,6 +195,8 @@ func _show_app(app_id: String) -> void:
 	match app_id:
 		"base":
 			_build_base_app()
+		"production":
+			_build_production_app()
 		"crew":
 			_build_crew_app()
 		"raids":
@@ -306,6 +310,70 @@ func _build_crew_app() -> void:
 			_format_slot_list(crew_member.get("task_types", [])),
 			_format_assignment(crew_member),
 		], 17)
+
+
+func _build_production_app() -> void:
+	title_label.text = "Production"
+	var intro: Dictionary = game_state.get_intro_mission_snapshot()
+	if not bool(intro.get("complete", false)):
+		_add_info_label("The workbench opens after the guided depot job. Current step: %s" % str(intro.get("title", "Introduction")), 18)
+		return
+	var rows: Array = game_state.get_base_production_rows()
+	var jobs: Array = game_state.get_base_production_jobs()
+	_add_info_label("Buy intermediate inputs in Market, deliver them to storage, then start a batch here.", 16)
+	if production_message != "":
+		var message_label := _add_info_label(production_message, 16)
+		message_label.modulate = PHONE_TEXT_MUTED
+	for job in jobs:
+		if not (job is Dictionary):
+			continue
+		var status := str(job.get("status", "running"))
+		var remaining := int(ceil(float(job.get("remaining_seconds", 0.0))))
+		var job_text := "%s — %s" % [str(job.get("facility_name", "Facility")), str(job.get("recipe_name", "Batch"))]
+		job_text += "\nWaiting for storage space" if status == "waiting_storage" else "\n%d seconds remaining" % remaining
+		_add_info_label(job_text, 17)
+		var cancel_button := Button.new()
+		cancel_button.text = "Cancel Batch"
+		cancel_button.custom_minimum_size = Vector2(150.0, 38.0)
+		cancel_button.pressed.connect(_on_cancel_production_pressed.bind(str(job.get("facility_id", ""))))
+		app_content.add_child(cancel_button)
+	if rows.is_empty():
+		_add_info_label("No active production facility is installed at this base.", 18)
+		return
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	app_content.add_child(scroll)
+	var recipe_list := VBoxContainer.new()
+	recipe_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	recipe_list.add_theme_constant_override("separation", 10)
+	scroll.add_child(recipe_list)
+	for row in rows:
+		if not (row is Dictionary):
+			continue
+		var panel := PanelContainer.new()
+		panel.add_theme_stylebox_override("panel", _make_panel_style(PHONE_PANEL_BG, PHONE_PANEL_BORDER, 1, 0))
+		recipe_list.add_child(panel)
+		var recipe_row := HBoxContainer.new()
+		recipe_row.add_theme_constant_override("separation", 12)
+		panel.add_child(recipe_row)
+		var details := Label.new()
+		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var output: Dictionary = row.get("output", {})
+		details.text = "%s\n%s\nInputs: %s\nOutput: %d %s | %ds" % [
+			str(row.get("name", "Recipe")), str(row.get("description", "")),
+			_format_production_inputs(row.get("inputs", {})), int(output.get("quantity", 0)),
+			_format_good_id(str(output.get("good", ""))), int(row.get("duration_seconds", 0)),
+		]
+		recipe_row.add_child(details)
+		var start_button := Button.new()
+		start_button.text = "Start Batch"
+		start_button.custom_minimum_size = Vector2(140.0, 44.0)
+		start_button.disabled = not bool(row.get("can_start", false))
+		start_button.tooltip_text = str(row.get("block_reason", ""))
+		start_button.pressed.connect(_on_start_production_pressed.bind(str(row.get("facility_id", "")), str(row.get("id", ""))))
+		recipe_row.add_child(start_button)
 
 
 func _build_hire_app() -> void:
@@ -1026,6 +1094,8 @@ func _add_trade_row(item: Dictionary) -> void:
 func _is_trade_row_disabled(item: Dictionary) -> bool:
 	if market_mode == "sell":
 		return int(item.get("available_sell_inventory", 0)) <= 0
+	if not bool(item.get("buy_enabled", true)):
+		return true
 	var remote_inventory: int = int(item.get("remote_inventory", 0))
 	return remote_inventory != game_state.TRADE_SOURCE_INFINITE and remote_inventory <= 0
 
@@ -1147,8 +1217,20 @@ func _make_panel_style(bg_color: Color, border_color: Color, border_width: int =
 func _refresh_current_base_app() -> void:
 	if not visible:
 		return
-	if ["base", "crew", "raids", "market", "orders", "hire"].has(current_app):
+	if ["base", "production", "crew", "raids", "market", "orders", "hire"].has(current_app):
 		_show_app(current_app)
+
+
+func _on_start_production_pressed(facility_id: String, recipe_id: String) -> void:
+	var result: Dictionary = game_state.start_base_production(facility_id, recipe_id)
+	production_message = str(result.get("message", "Production updated."))
+	_show_app("production")
+
+
+func _on_cancel_production_pressed(facility_id: String) -> void:
+	var result: Dictionary = game_state.cancel_base_production(facility_id)
+	production_message = str(result.get("message", "Production updated."))
+	_show_app("production")
 
 
 func _on_hire_pressed(candidate_id: String) -> void:
@@ -1251,6 +1333,19 @@ func _format_slot_list(value: Variant) -> String:
 	for item in value:
 		names.append(str(item).capitalize().replace("_", " "))
 	return ", ".join(names)
+
+
+func _format_production_inputs(inputs: Variant) -> String:
+	if not (inputs is Dictionary):
+		return "None"
+	var parts := PackedStringArray()
+	for good_id in inputs:
+		parts.append("%d %s" % [int(inputs[good_id]), _format_good_id(str(good_id))])
+	return ", ".join(parts)
+
+
+func _format_good_id(good_id: String) -> String:
+	return good_id.capitalize().replace("_", " ")
 
 
 func _format_assignment(crew_member: Dictionary) -> String:

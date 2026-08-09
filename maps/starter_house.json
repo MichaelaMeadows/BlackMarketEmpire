@@ -101,7 +101,7 @@
 	],
 	"facilities": [
 		{"id": "planning_table", "name": "Planning Table", "type": "planning", "room_id": "living_room", "slot_id": "planning_table", "position": [-250, 70], "capacity": 0, "visual_id": "planning_table", "color": [0.24, 0.17, 0.11]},
-		{"id": "basic_workbench", "name": "Basic Workbench", "type": "production", "room_id": "kitchen", "slot_id": "basic_workbench", "position": [-250, -160], "capacity": 0, "visual_id": "workbench", "color": [0.28, 0.19, 0.12]},
+		{"id": "basic_workbench", "name": "Basic Workbench", "type": "production", "room_id": "kitchen", "slot_id": "basic_workbench", "position": [-250, -160], "capacity": 1, "workers_required": 0, "recipe_ids": ["make_plain_wraps", "make_clean_labels", "make_burner_parts"], "visual_id": "workbench", "color": [0.28, 0.19, 0.12]},
 		{"id": "crew_bunk", "name": "Crew Bunk", "type": "staff", "room_id": "bedroom", "slot_id": "crew_bunk", "position": [80, -170], "capacity": 1, "visual_id": "bunk", "color": [0.18, 0.20, 0.22]},
 		{"id": "stash_shelf", "name": "Stash Shelf", "type": "storage", "room_id": "basement_storage", "slot_id": "stash_shelf", "position": [250, 60], "capacity": 20, "unit": "kg", "visual_id": "shelves", "color": [0.20, 0.16, 0.11]},
 		{"id": "supply_crates", "name": "Supply Crates", "type": "utility", "room_id": "basement_storage", "slot_id": "supply_crates", "position": [320, 220], "capacity": 0, "visual_id": "crates", "color": [0.32, 0.22, 0.13]}

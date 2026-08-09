@@ -1,0 +1,28 @@
+{
+  "recipes": [
+    {
+      "id": "make_plain_wraps",
+      "name": "Assemble Plain Wraps",
+      "description": "Combine packaging and clean textiles into a useful cover product.",
+      "inputs": {"packaging_stock": 2, "clean_textiles": 1},
+      "output": {"good": "plain_wraps", "quantity": 3},
+      "duration_seconds": 20
+    },
+    {
+      "id": "make_clean_labels",
+      "name": "Print Clean Labels",
+      "description": "Turn paper forms and packaging stock into clean labels.",
+      "inputs": {"paper_forms": 2, "packaging_stock": 1},
+      "output": {"good": "clean_labels", "quantity": 3},
+      "duration_seconds": 24
+    },
+    {
+      "id": "make_burner_parts",
+      "name": "Assemble Burner Parts",
+      "description": "Build a small batch of tool components from repair and industrial supplies.",
+      "inputs": {"repair_parts": 2, "industrial_supplies": 1},
+      "output": {"good": "burner_parts", "quantity": 1},
+      "duration_seconds": 30
+    }
+  ]
+}

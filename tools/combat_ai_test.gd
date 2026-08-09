@@ -46,6 +46,10 @@ func _run() -> void:
 	_test_navigation_cover_rejects_blocked_points()
 	_test_navigation_follow_keeps_squadmates_from_stacking()
 	_test_squad_reports_respect_faction_and_confidence()
+	_test_attack_order_prioritizes_selected_hostile()
+	_test_hold_order_ignores_hostiles_outside_defended_area()
+	_test_hold_order_engages_hostiles_inside_defended_area()
+	_test_hold_order_returns_unit_to_anchor()
 
 	if _failures == 0:
 		print("Combat AI tests passed.")
@@ -704,6 +708,84 @@ func _test_squad_reports_respect_faction_and_confidence() -> void:
 	_expect(ai.current_target == visible_target, "report from wrong faction is ignored")
 
 	_free_nodes([owner, ally, other_squad, stranger, visible_target, reported_target])
+
+
+func _test_attack_order_prioritizes_selected_hostile() -> void:
+	var owner: CharacterBody2D = _new_unit("guard", "crew", Vector2.ZERO)
+	var nearby: CharacterBody2D = _new_unit("nearby", "rival", Vector2(90, 0))
+	var ordered: CharacterBody2D = _new_unit("ordered", "rival", Vector2(360, 0))
+	var ai = _new_ai(owner, {
+		"hostile_factions": ["rival"],
+		"detection_radius": 140.0,
+		"attack_range": 120.0,
+		"reaction_time": 0.0,
+	})
+
+	_expect(ai.issue_attack_order(ordered), "attack order accepts an explicit hostile")
+	ai.tick_ai(0.1)
+	_expect(ai.get_order_name() == "ATTACK", "attack order remains active while target lives")
+	_expect(ai.current_target == ordered, "attack order overrides nearer autonomous target selection")
+	_expect(ai.get_state_name() == "CHASING", "attack order pursues target outside normal detection radius")
+
+	_free_nodes([owner, nearby, ordered])
+
+
+func _test_hold_order_ignores_hostiles_outside_defended_area() -> void:
+	var owner: CharacterBody2D = _new_unit("guard", "crew", Vector2.ZERO)
+	var target: CharacterBody2D = _new_unit("target", "rival", Vector2(220, 0))
+	var ai = _new_ai(owner, {
+		"hostile_factions": ["rival"],
+		"detection_radius": 400.0,
+		"attack_range": 260.0,
+	})
+
+	ai.issue_hold_order(Vector2.ZERO, 120.0)
+	ai.tick_ai(0.1)
+	_expect(ai.get_order_name() == "HOLD", "hold order records persistent tactical intent")
+	_expect(ai.get_state_name() == "HOLDING", "holding unit stays put when hostile is outside defended area")
+	_expect(ai.current_target == null, "hold order rejects targets beyond its engagement radius")
+
+	_free_nodes([owner, target])
+
+
+func _test_hold_order_engages_hostiles_inside_defended_area() -> void:
+	var owner: CharacterBody2D = _new_unit("guard", "crew", Vector2.ZERO)
+	var target: CharacterBody2D = _new_unit("target", "rival", Vector2(90, 0))
+	var ai = _new_ai(owner, {
+		"hostile_factions": ["rival"],
+		"detection_radius": 300.0,
+		"attack_range": 140.0,
+		"reaction_time": 0.0,
+	})
+
+	ai.issue_hold_order(Vector2.ZERO, 120.0)
+	ai.tick_ai(0.1)
+	_expect(ai.current_target == target, "hold order acquires hostile inside defended area")
+	_expect(ai.get_state_name() == "ATTACKING", "holding unit attacks an in-range hostile")
+	_expect(owner.velocity == Vector2.ZERO, "holding unit does not make tactical micro-movements while attacking")
+
+	owner.global_position = Vector2(16, 0)
+	ai.tick_ai(0.1)
+	_expect(owner.velocity == Vector2.ZERO, "hold anchor hysteresis ignores small collision displacement")
+
+	owner.global_position = Vector2(36, 0)
+	ai.tick_ai(0.1)
+	_expect(ai.get_state_name() == "MOVING_TO_ORDER", "holding unit returns after meaningful displacement")
+	_expect(owner.velocity.x < 0.0, "hold return moves toward the anchor without oscillating at its edge")
+
+	_free_nodes([owner, target])
+
+
+func _test_hold_order_returns_unit_to_anchor() -> void:
+	var owner: CharacterBody2D = _new_unit("guard", "crew", Vector2(180, 0))
+	var ai = _new_ai(owner, {"hostile_factions": ["rival"], "follow_speed": 100.0})
+
+	ai.issue_hold_order(Vector2.ZERO, 100.0)
+	ai.tick_ai(0.1)
+	_expect(ai.get_state_name() == "MOVING_TO_ORDER", "holding unit returns when displaced from its anchor")
+	_expect(owner.velocity.x < 0.0, "hold return movement points back toward assigned position")
+
+	_free_nodes([owner])
 
 
 func _new_unit(unit_name: String, faction: String, position: Vector2, weapon_data: Dictionary = {}) -> CharacterBody2D:

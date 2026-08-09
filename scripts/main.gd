@@ -6,6 +6,7 @@ const NPC_SCENE := preload("res://scenes/npc/BasicNpc.tscn")
 const MAP_LOADER_SCRIPT := preload("res://scripts/map_loader.gd")
 const NAVIGATION_MOVER_SCRIPT := preload("res://scripts/navigation_mover.gd")
 const PHONE_UI_SCRIPT := preload("res://scripts/phone_ui.gd")
+const SQUAD_COMMAND_MARKER_SCRIPT := preload("res://scripts/squad_command_marker.gd")
 const GAME_STATE_SCRIPT := preload("res://scripts/autoload/game_state.gd")
 const UI_TOKENS := preload("res://scripts/ui/ui_tokens.gd")
 const UI_THEME := preload("res://scripts/ui/ui_theme.gd")
@@ -17,6 +18,9 @@ const RUNNER_AWAY_SECONDS := 4.0
 const SENT_RAID_FALLBACK_SECONDS := 3.0
 const RAID_DEPARTURE_SPEED := 125.0
 const CREW_ARRIVAL_SPEED := 105.0
+const CREW_ARRIVAL_SETTLE_DISTANCE := 28.0
+const CREW_ARRIVAL_MAX_SECONDS := 12.0
+const CREW_ARRIVAL_STALL_SECONDS := 1.5
 const ENEMY_THUG_NAMES := ["Rook", "Mack", "Vince", "Doyle", "Kane", "Rafe"]
 
 var player: CharacterBody2D
@@ -31,7 +35,18 @@ var reload_button: Button
 var prompt_label: Label
 var status_label: Label
 var scope_label: Label
+var mission_panel: PanelContainer
+var mission_title_label: Label
+var mission_objective_label: Label
+var mission_progress_label: Label
 var progression_dialog: AcceptDialog
+var squad_command_label: Label
+var follow_command_button: Button
+var attack_command_button: Button
+var hold_command_button: Button
+var squad_command_marker
+var squad_command_mode := "follow"
+var squad_targeting_mode := ""
 var spawned_npcs: Array = []
 var spawned_contacts: Array = []
 var active_runner_jobs: Dictionary = {}
@@ -53,12 +68,14 @@ func _ready() -> void:
 	game_state.state_changed.connect(_on_game_state_changed)
 	game_state.crew_hired.connect(_on_crew_hired)
 	game_state.progression_event_triggered.connect(_on_progression_event_triggered)
+	game_state.intro_mission_changed.connect(_on_intro_mission_changed)
 	_refresh_hud()
 	_set_status("%s is yours. Open the phone to manage the base or plan a raid." % game_state.get_base_summary().get("name", map_loader.get_title()))
 
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("phone"):
+		_cancel_squad_targeting()
 		phone_ui.toggle()
 		get_viewport().set_input_as_handled()
 		return
@@ -67,6 +84,27 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if phone_ui != null and phone_ui.is_open():
 		return
+	if event.is_action_pressed("squad_follow"):
+		_issue_squad_follow()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("squad_attack"):
+		_begin_squad_attack_targeting()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("squad_hold"):
+		_issue_squad_hold()
+		get_viewport().set_input_as_handled()
+		return
+	if squad_targeting_mode != "":
+		if event.is_action_pressed("ui_cancel"):
+			_cancel_squad_targeting()
+			get_viewport().set_input_as_handled()
+			return
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			_try_issue_squad_attack_at(get_global_mouse_position())
+			get_viewport().set_input_as_handled()
+			return
 
 	if active_contact == null:
 		return
@@ -91,6 +129,7 @@ func _process(delta: float) -> void:
 	_update_crew_arrivals(delta)
 	_update_runner_jobs(delta)
 	_refresh_ammo_hud()
+	_sync_completed_squad_attack()
 
 
 func _resolve_game_state():
@@ -143,6 +182,7 @@ func _clear_gameplay_map() -> void:
 	active_crew_arrivals.clear()
 	active_raid_departures.clear()
 	active_raid_departure.clear()
+	_clear_squad_command_feedback()
 
 	if player != null and is_instance_valid(player):
 		player.queue_free()
@@ -319,6 +359,7 @@ func _build_hud() -> void:
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.theme = UI_THEME.create()
 	margin.add_theme_constant_override("margin_left", 18)
 	margin.add_theme_constant_override("margin_top", 18)
@@ -327,6 +368,7 @@ func _build_hud() -> void:
 	canvas.add_child(margin)
 
 	var layout := VBoxContainer.new()
+	layout.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(layout)
@@ -339,6 +381,20 @@ func _build_hud() -> void:
 	scope_label.add_theme_font_size_override("font_size", 15)
 	scope_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope_label)
+
+	mission_panel = UI.panel(UI_TOKENS.SPACE_2)
+	mission_panel.custom_minimum_size = Vector2(520.0, 0.0)
+	layout.add_child(mission_panel)
+	var mission_stack := VBoxContainer.new()
+	mission_stack.add_theme_constant_override("separation", UI_TOKENS.SPACE_1)
+	mission_panel.add_child(mission_stack)
+	mission_title_label = UI.label("Next Step", "section")
+	mission_stack.add_child(mission_title_label)
+	mission_objective_label = UI.label("", "body")
+	mission_objective_label.custom_minimum_size.x = 480.0
+	mission_stack.add_child(mission_objective_label)
+	mission_progress_label = UI.label("", "support")
+	mission_stack.add_child(mission_progress_label)
 
 	var combat_row := HBoxContainer.new()
 	combat_row.add_theme_constant_override("separation", 10)
@@ -367,6 +423,46 @@ func _build_hud() -> void:
 	status_label.modulate = UI_TOKENS.DUST
 	layout.add_child(status_label)
 
+	var command_anchor := HBoxContainer.new()
+	command_anchor.alignment = BoxContainer.ALIGNMENT_CENTER
+	command_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layout.add_child(command_anchor)
+
+	var command_panel := UI.panel(UI_TOKENS.SPACE_2)
+	command_panel.custom_minimum_size.x = 480.0
+	command_anchor.add_child(command_panel)
+	var command_row := HBoxContainer.new()
+	command_row.add_theme_constant_override("separation", UI_TOKENS.SPACE_2)
+	command_panel.add_child(command_row)
+
+	squad_command_label = UI.label("Squad: Follow", "support")
+	squad_command_label.custom_minimum_size.x = 130.0
+	squad_command_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	command_row.add_child(squad_command_label)
+
+	follow_command_button = UI.button("[1] Follow", "Crew follows and regroups with you")
+	follow_command_button.focus_mode = Control.FOCUS_NONE
+	follow_command_button.toggle_mode = true
+	follow_command_button.pressed.connect(_issue_squad_follow)
+	command_row.add_child(follow_command_button)
+
+	attack_command_button = UI.button("[2] Attack", "Choose an enemy for the whole squad to prioritize")
+	attack_command_button.focus_mode = Control.FOCUS_NONE
+	attack_command_button.toggle_mode = true
+	attack_command_button.pressed.connect(_begin_squad_attack_targeting)
+	command_row.add_child(attack_command_button)
+
+	hold_command_button = UI.button("[3] Hold", "Crew defends its current positions")
+	hold_command_button.focus_mode = Control.FOCUS_NONE
+	hold_command_button.toggle_mode = true
+	hold_command_button.pressed.connect(_issue_squad_hold)
+	command_row.add_child(hold_command_button)
+
+	squad_command_marker = SQUAD_COMMAND_MARKER_SCRIPT.new()
+	squad_command_marker.z_index = 8
+	add_child(squad_command_marker)
+	_refresh_squad_command_ui()
+
 	progression_dialog = AcceptDialog.new()
 	progression_dialog.title = "New Lead"
 	progression_dialog.min_size = Vector2i(420, 0)
@@ -380,6 +476,7 @@ func _on_contact_presence_changed(contact: Area2D, is_near: bool) -> void:
 		if active_contact == contact:
 			active_contact = null
 	_refresh_prompt()
+	_refresh_squad_command_ui()
 
 
 func _on_contacted(contact: Area2D) -> void:
@@ -439,14 +536,23 @@ func _refresh_hud() -> void:
 		int(player_health.get("max_health", 100)),
 	]
 	if _is_home_map():
-		scope_label.text = "%s tier. Next base: %s." % [
-			str(base_summary.get("tier", "Base")).capitalize(),
-			str(base_summary.get("next_base_hint", "Unknown")),
-		]
+		var home_raid: Dictionary = game_state.get_active_raid_target()
+		match str(home_raid.get("mode", "")):
+			"departing":
+				scope_label.text = "Raid party leaving for %s: %d crew moving to the exit." % [str(home_raid.get("name", "target")), active_raid_departures.size()]
+			"sent":
+				scope_label.text = "Raid underway at %s." % str(home_raid.get("name", "target"))
+			_:
+				scope_label.text = "%s tier. Next base: %s." % [
+					str(base_summary.get("tier", "Base")).capitalize(),
+					str(base_summary.get("next_base_hint", "Unknown")),
+				]
 	else:
 		var active_raid: Dictionary = game_state.get_active_raid_target()
 		scope_label.text = "Raid: %s. Use the phone's Raids app to return home." % str(active_raid.get("name", map_loader.get_title()))
 	_refresh_prompt()
+	_refresh_squad_command_ui()
+	_refresh_intro_mission()
 
 
 func _refresh_prompt() -> void:
@@ -454,7 +560,7 @@ func _refresh_prompt() -> void:
 		return
 
 	if active_contact == null:
-		prompt_label.text = "Move: WASD / Arrows    Mouse Aim    Space Fire    Q Melee    R Reload    Tab Phone"
+		prompt_label.text = "Move: WASD / Arrows    Fire: Space    Squad: 1 Follow, 2 Attack, 3 Hold    Tab Phone"
 	else:
 		prompt_label.text = "%s: E %s    B Buy    X Sell    F Fixer    Mouse Aim    Space Fire    Q Melee    R Reload    Tab Phone" % [
 			active_contact.contact_name,
@@ -490,6 +596,7 @@ func _on_npc_died(npc: CharacterBody2D) -> void:
 		active_runner_jobs.erase(crew_id)
 		active_runner_jobs.erase(str(npc.get_meta("npc_id", "")))
 		active_raid_departures.erase(crew_id)
+		active_crew_arrivals.erase(crew_id)
 		var result: Dictionary = game_state.remove_crew_member(crew_id)
 		_set_status(str(result.get("message", "Crew member died.")))
 		_refresh_hud()
@@ -515,8 +622,8 @@ func _on_crew_hired(crew_member: Dictionary) -> void:
 	var roster_index := _get_roster_index(crew_id)
 	var target := _get_crew_idle_position(crew_member, roster_index)
 	var entry_position := _get_crew_entry_position(target)
-	_spawn_home_crew_member(crew_member, entry_position)
-	active_crew_arrivals[crew_id] = {"target": target}
+	var npc = _spawn_home_crew_member(crew_member, entry_position)
+	_begin_crew_arrival(crew_id, npc, target)
 	_maybe_trigger_starter_thug_attack()
 
 
@@ -526,6 +633,39 @@ func _on_progression_event_triggered(event: Dictionary) -> void:
 		_set_status(message)
 		if str(event.get("type", "")) == "event":
 			_show_progression_popup(message)
+
+
+func _on_intro_mission_changed(snapshot: Dictionary, transition: Dictionary) -> void:
+	_refresh_intro_mission(snapshot)
+	if not bool(transition.get("completed", false)):
+		return
+	if bool(snapshot.get("complete", false)):
+		_show_progression_popup("%s\n\n%s" % [str(snapshot.get("title", "Operation Open")), str(snapshot.get("description", ""))])
+		return
+	var completed: Dictionary = transition.get("completed_mission", {})
+	_set_status("Completed: %s. Next: %s." % [str(completed.get("title", "Mission")), str(snapshot.get("title", "Next Step"))])
+
+
+func _refresh_intro_mission(snapshot: Dictionary = {}) -> void:
+	if mission_panel == null:
+		return
+	if snapshot.is_empty():
+		snapshot = game_state.get_intro_mission_snapshot()
+	var complete := bool(snapshot.get("complete", false))
+	mission_panel.visible = not complete
+	if complete:
+		return
+	mission_title_label.text = "NEXT STEP %d/%d  •  %s" % [
+		int(snapshot.get("index", 0)) + 1,
+		int(snapshot.get("count", 1)),
+		str(snapshot.get("title", "Next Step")),
+	]
+	mission_objective_label.text = str(snapshot.get("description", ""))
+	mission_progress_label.text = "%s: %d/%d" % [
+		str(snapshot.get("progress_label", "Progress")),
+		int(snapshot.get("progress", 0)),
+		int(snapshot.get("target", 1)),
+	]
 
 
 func _show_progression_popup(message: String) -> void:
@@ -601,8 +741,48 @@ func _update_crew_arrivals(delta: float) -> void:
 			continue
 		var arrival: Dictionary = active_crew_arrivals[crew_id]
 		var target: Vector2 = arrival.get("target", npc.position)
+		var distance: float = npc.position.distance_to(target)
+		arrival["elapsed_seconds"] = float(arrival.get("elapsed_seconds", 0.0)) + delta
+		var previous_distance := float(arrival.get("last_distance", distance))
+		if distance < previous_distance - 0.5:
+			arrival["stalled_seconds"] = 0.0
+		else:
+			arrival["stalled_seconds"] = float(arrival.get("stalled_seconds", 0.0)) + delta
+		arrival["last_distance"] = distance
+		if distance <= CREW_ARRIVAL_SETTLE_DISTANCE \
+				or float(arrival["elapsed_seconds"]) >= CREW_ARRIVAL_MAX_SECONDS \
+				or float(arrival["stalled_seconds"]) >= CREW_ARRIVAL_STALL_SECONDS:
+			_finish_crew_arrival(str(crew_id), npc)
+			continue
+		active_crew_arrivals[crew_id] = arrival
 		if NAVIGATION_MOVER_SCRIPT.move_towards(npc, target, CREW_ARRIVAL_SPEED, delta, _get_navigation()):
-			active_crew_arrivals.erase(crew_id)
+			_finish_crew_arrival(str(crew_id), npc)
+
+
+func _begin_crew_arrival(crew_id: String, npc: Node, target: Vector2) -> void:
+	if crew_id == "" or npc == null:
+		return
+	var combat_ai = npc.get("combat_ai")
+	if combat_ai != null:
+		combat_ai.set("enabled", false)
+	active_crew_arrivals[crew_id] = {
+		"target": target,
+		"elapsed_seconds": 0.0,
+		"stalled_seconds": 0.0,
+		"last_distance": npc.position.distance_to(target),
+	}
+
+
+func _finish_crew_arrival(crew_id: String, npc: Node) -> void:
+	active_crew_arrivals.erase(crew_id)
+	if npc == null or not is_instance_valid(npc):
+		return
+	npc.velocity = Vector2.ZERO
+	var combat_ai = npc.get("combat_ai")
+	if combat_ai != null:
+		combat_ai.set("enabled", true)
+		if combat_ai.has_method("issue_follow_order"):
+			combat_ai.issue_follow_order(player)
 
 
 func _refresh_occluded_actor_visibility() -> void:
@@ -659,9 +839,19 @@ func _start_raid_departure(target_id: String, crew_ids: Array) -> void:
 		var npc = _find_spawned_npc_by_id(crew_id)
 		if npc == null:
 			continue
+		# A newly hired unit may still be walking from the map entrance to its idle
+		# position. That job runs after departures each frame, so it must yield too.
+		active_crew_arrivals.erase(crew_id)
+		# Departure movement owns the unit until it leaves the map. Without this,
+		# persistent squad orders (especially Follow) pull combat crew back to the player.
+		var combat_ai = npc.get("combat_ai")
+		if combat_ai != null:
+			combat_ai.set("enabled", false)
+			npc.velocity = Vector2.ZERO
 		active_raid_departures[crew_id] = {
 			"exit_position": _get_exit_position(npc.position),
 		}
+	_refresh_hud()
 	_complete_raid_departure_if_ready()
 
 
@@ -820,6 +1010,8 @@ func _configure_player_crew_follow(npc: Node) -> void:
 	var combat_ai = npc.get("combat_ai")
 	if combat_ai != null and combat_ai.has_method("set_follow_target"):
 		combat_ai.set_follow_target(player, 88.0, 260.0)
+		if combat_ai.has_method("issue_follow_order"):
+			combat_ai.issue_follow_order(player)
 
 
 func _configure_npc_navigation(npc: Node) -> void:
@@ -1090,14 +1282,25 @@ func _get_exit_position(from_position: Vector2) -> Vector2:
 		Vector2(bounds.position.x - 80.0, bounds.get_center().y),
 		Vector2(bounds.end.x + 80.0, bounds.get_center().y),
 	]
-	var best: Vector2 = candidates[0]
+	var navigation = _get_navigation()
+	var best := Vector2.ZERO
 	var best_distance := INF
 	for candidate in candidates:
-		var distance := from_position.distance_to(candidate)
+		var destination := _get_navigable_position(candidate)
+		var distance := from_position.distance_to(destination)
+		if navigation != null and navigation.has_method("find_path"):
+			var path: PackedVector2Array = navigation.find_path(from_position, destination)
+			if path.is_empty() and from_position.distance_to(destination) > 8.0:
+				continue
+			distance = 0.0
+			var cursor := from_position
+			for waypoint in path:
+				distance += cursor.distance_to(waypoint)
+				cursor = waypoint
 		if distance < best_distance:
 			best_distance = distance
-			best = candidate
-	return best
+			best = destination
+	return best if best != Vector2.ZERO else _get_navigable_position(candidates[1])
 
 
 func _get_navigation():
@@ -1142,6 +1345,9 @@ func _ensure_input_map() -> void:
 	_bind_key("fire", KEY_SPACE)
 	_bind_key("melee", KEY_Q)
 	_bind_key("reload", KEY_R)
+	_bind_key("squad_follow", KEY_1)
+	_bind_key("squad_attack", KEY_2)
+	_bind_key("squad_hold", KEY_3)
 
 
 func _bind_key(action_name: StringName, physical_keycode: Key) -> void:
@@ -1177,6 +1383,8 @@ func _read_color(value: Variant, fallback: Color) -> Color:
 
 
 func _on_phone_visibility_changed(is_open: bool) -> void:
+	if is_open:
+		_cancel_squad_targeting()
 	if player != null:
 		player.set("controls_enabled", not is_open)
 
@@ -1213,6 +1421,156 @@ func _refresh_ammo_hud() -> void:
 		" (Reloading)" if is_reloading else "",
 	]
 	reload_button.disabled = is_reloading or ammo >= magazine_size
+
+
+func _get_commandable_squad() -> Array:
+	var squad: Array = []
+	for npc in spawned_npcs:
+		if not is_instance_valid(npc) or not npc.visible:
+			continue
+		var crew_id := str(npc.get_meta("crew_id", npc.get_meta("npc_id", "")))
+		if active_raid_departures.has(crew_id) or active_crew_arrivals.has(crew_id):
+			continue
+		if not npc.has_method("get_faction") or str(npc.get_faction()) != "player_crew":
+			continue
+		var combat_ai = npc.get("combat_ai")
+		if combat_ai != null and combat_ai.has_method("issue_follow_order"):
+			squad.append(npc)
+	return squad
+
+
+func _issue_squad_follow() -> void:
+	var squad := _get_commandable_squad()
+	if squad.is_empty():
+		_set_status("No combat crew is available to command.")
+		_refresh_squad_command_ui()
+		return
+	for npc in squad:
+		npc.get("combat_ai").issue_follow_order(player)
+	squad_command_mode = "follow"
+	squad_targeting_mode = ""
+	if squad_command_marker != null:
+		squad_command_marker.show_follow()
+	_set_status("Squad ordered to follow and regroup.")
+	game_state.record_intro_mission_event("squad_order_issued", {"order_type": "follow"})
+	_refresh_squad_command_ui()
+
+
+func _begin_squad_attack_targeting() -> void:
+	if _get_commandable_squad().is_empty():
+		_set_status("No combat crew is available to command.")
+		_refresh_squad_command_ui()
+		return
+	squad_targeting_mode = "attack"
+	_set_status("Attack order: left-click a hostile unit. Esc cancels.")
+	_refresh_squad_command_ui()
+
+
+func _try_issue_squad_attack_at(world_position: Vector2) -> bool:
+	var squad := _get_commandable_squad()
+	var target: Node2D = _find_hostile_at(world_position, squad)
+	if target == null:
+		_set_status("No hostile unit there. Left-click a hostile or press Esc.")
+		return false
+	var issued := 0
+	for npc in squad:
+		if npc.get("combat_ai").issue_attack_order(target):
+			issued += 1
+	if issued == 0:
+		_set_status("The squad cannot attack that target.")
+		return false
+	squad_command_mode = "attack"
+	squad_targeting_mode = ""
+	if squad_command_marker != null:
+		squad_command_marker.show_attack(target)
+	_set_status("Squad ordered to attack %s." % str(target.get("npc_name") if target.get("npc_name") != null else target.name))
+	game_state.record_intro_mission_event("squad_order_issued", {"order_type": "attack"})
+	_refresh_squad_command_ui()
+	return true
+
+
+func _issue_squad_hold() -> void:
+	var squad := _get_commandable_squad()
+	if squad.is_empty():
+		_set_status("No combat crew is available to command.")
+		_refresh_squad_command_ui()
+		return
+	var positions: Array = []
+	for npc in squad:
+		positions.append(npc.global_position)
+		npc.get("combat_ai").issue_hold_order(npc.global_position)
+	squad_command_mode = "hold"
+	squad_targeting_mode = ""
+	if squad_command_marker != null:
+		squad_command_marker.show_hold(positions)
+	_set_status("Squad holding current positions and engaging nearby hostiles.")
+	game_state.record_intro_mission_event("squad_order_issued", {"order_type": "hold"})
+	_refresh_squad_command_ui()
+
+
+func _find_hostile_at(world_position: Vector2, squad: Array):
+	var best_target: Node2D = null
+	var best_distance := 42.0
+	for candidate in get_tree().get_nodes_in_group("combat_unit"):
+		if not (candidate is Node2D) or candidate == player or not candidate.visible:
+			continue
+		var hostile := false
+		for npc in squad:
+			var combat_ai = npc.get("combat_ai")
+			if combat_ai != null and combat_ai.has_method("is_hostile") and combat_ai.is_hostile(candidate):
+				hostile = true
+				break
+		if not hostile:
+			continue
+		var distance: float = world_position.distance_to(candidate.global_position)
+		if distance <= best_distance:
+			best_distance = distance
+			best_target = candidate
+	return best_target
+
+
+func _cancel_squad_targeting() -> void:
+	if squad_targeting_mode == "":
+		return
+	squad_targeting_mode = ""
+	_set_status("Attack targeting cancelled.")
+	_refresh_squad_command_ui()
+
+
+func _sync_completed_squad_attack() -> void:
+	if squad_command_mode != "attack" or squad_targeting_mode != "":
+		return
+	var squad := _get_commandable_squad()
+	for npc in squad:
+		var combat_ai = npc.get("combat_ai")
+		if combat_ai != null and combat_ai.has_method("get_order_name") and combat_ai.get_order_name() == "ATTACK":
+			return
+	squad_command_mode = "follow"
+	if squad_command_marker != null:
+		squad_command_marker.show_follow()
+	_set_status("Attack target neutralized. Squad resuming follow order.")
+	_refresh_squad_command_ui()
+
+
+func _clear_squad_command_feedback() -> void:
+	squad_targeting_mode = ""
+	squad_command_mode = "follow"
+	if squad_command_marker != null:
+		squad_command_marker.show_follow()
+
+
+func _refresh_squad_command_ui() -> void:
+	if squad_command_label == null:
+		return
+	var squad_count := _get_commandable_squad().size()
+	var display_mode := "Choose Target" if squad_targeting_mode == "attack" else squad_command_mode.capitalize()
+	squad_command_label.text = "Squad (%d): %s" % [squad_count, display_mode]
+	follow_command_button.disabled = squad_count == 0
+	attack_command_button.disabled = squad_count == 0
+	hold_command_button.disabled = squad_count == 0
+	follow_command_button.button_pressed = squad_targeting_mode == "" and squad_command_mode == "follow"
+	attack_command_button.button_pressed = squad_targeting_mode == "attack" or squad_command_mode == "attack"
+	hold_command_button.button_pressed = squad_targeting_mode == "" and squad_command_mode == "hold"
 
 
 func _result(ok: bool, message: String) -> Dictionary:
